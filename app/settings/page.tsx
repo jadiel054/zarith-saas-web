@@ -3,313 +3,280 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { 
+  User, 
+  Palette, 
+  Cpu, 
+  Key, 
+  Shield, 
+  LogOut, 
+  Camera, 
+  Eye, 
+  EyeOff, 
+  CheckCircle2, 
+  ChevronLeft,
+  Download
+} from "lucide-react";
+import Link from "next/link";
 import { supabaseClient } from "@/lib/supabase/client";
 
-interface Settings {
+type Tab = "conta" | "aparencia" | "modelos" | "api" | "privacidade" | "sessao";
+
+interface UserSettings {
   groq_key_encrypted?: string;
   openrouter_key_encrypted?: string;
   gemini_key_encrypted?: string;
   github_token_encrypted?: string;
   greptile_key_encrypted?: string;
+  tavily_key_encrypted?: string;
+}
+
+interface SupabaseUser {
+  id: string;
+  email?: string;
+  user_metadata: {
+    avatar_url?: string;
+    full_name?: string;
+  };
 }
 
 export default function SettingsPage() {
-  const [groqKey, setGroqKey] = useState("");
-  const [openrouterKey, setOpenrouterKey] = useState("");
-  const [geminiKey, setGeminiKey] = useState("");
-  const [githubToken, setGithubToken] = useState("");
-  const [greptileKey, setGreptileKey] = useState("");
-  const [saved, setSaved] = useState(false);
+  const [activeTab, setActiveTab] = useState<Tab>("conta");
+  const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [apiKeys, setApiKeys] = useState<UserSettings>({});
 
-  // Carregar settings do Supabase ao montar
   useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        if (!supabaseClient) {
-          setError("Supabase não configurado");
-          setLoading(false);
-          return;
-        }
-
-        // Obter usuário atual
-        const {
-          data: { user },
-          error: userError,
-        } = await supabaseClient.auth.getUser();
-
-        if (userError || !user) {
-          setError("Não autenticado");
-          setLoading(false);
-          return;
-        }
-
-        setUserId(user.id);
-
-        // Buscar settings do banco
-        const { data: settingsData, error: settingsError } = await supabaseClient
+    const loadData = async () => {
+      if (!supabaseClient) return;
+      
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      if (user) {
+        setUser(user as unknown as SupabaseUser);
+        const { data } = await supabaseClient
           .from("settings")
           .select("*")
           .eq("user_id", user.id)
           .single();
-
-        if (settingsError && settingsError.code !== "PGRST116") {
-          // PGRST116 = not found (esperado para novo usuário)
-          console.error("Erro ao carregar settings:", settingsError);
-        }
-
-        if (settingsData) {
-          const settings = settingsData as Settings;
-          // Nota: Em produção, as chaves viriam descriptografadas do servidor
-          // Por enquanto, apenas preenchemos se existirem
-          if (settings.groq_key_encrypted) setGroqKey("••••••••••••••••");
-          if (settings.openrouter_key_encrypted) setOpenrouterKey("••••••••••••••••");
-          if (settings.gemini_key_encrypted) setGeminiKey("••••••••••••••••");
-          if (settings.github_token_encrypted) setGithubToken("••••••••••••••••");
-          if (settings.greptile_key_encrypted) setGreptileKey("••••••••••••••••");
-        }
-      } catch (err) {
-        console.error("Erro ao carregar settings:", err);
-        setError("Erro ao carregar configurações");
-      } finally {
-        setLoading(false);
+        
+        if (data) setApiKeys(data);
       }
+      setLoading(false);
     };
-
-    loadSettings();
+    loadData();
   }, []);
 
-  const handleSave = async () => {
-    try {
-      if (!supabaseClient || !userId) {
-        setError("Não autenticado");
-        return;
-      }
-
-      // Preparar dados para salvar
-      const settingsToSave: Record<string, string> = {};
-
-      if (groqKey && !groqKey.includes("•")) {
-        settingsToSave.groq_key_encrypted = groqKey;
-      }
-      if (openrouterKey && !openrouterKey.includes("•")) {
-        settingsToSave.openrouter_key_encrypted = openrouterKey;
-      }
-      if (geminiKey && !geminiKey.includes("•")) {
-        settingsToSave.gemini_key_encrypted = geminiKey;
-      }
-      if (githubToken && !githubToken.includes("•")) {
-        settingsToSave.github_token_encrypted = githubToken;
-      }
-      if (greptileKey && !greptileKey.includes("•")) {
-        settingsToSave.greptile_key_encrypted = greptileKey;
-      }
-
-      // Verificar se settings já existe
-      const { data: existingSettings, error: checkError } = await supabaseClient
-        .from("settings")
-        .select("id")
-        .eq("user_id", userId)
-        .single();
-
-      if (checkError && checkError.code !== "PGRST116") {
-        throw checkError;
-      }
-
-      let result;
-      if (existingSettings) {
-        // Atualizar
-        result = await supabaseClient
-          .from("settings")
-          .update(settingsToSave)
-          .eq("user_id", userId)
-          .select();
-      } else {
-        // Inserir
-        result = await supabaseClient
-          .from("settings")
-          .insert([{ user_id: userId, ...settingsToSave }])
-          .select();
-      }
-
-      if (result.error) {
-        throw result.error;
-      }
-
-      setSaved(true);
-      setError(null);
-
-      // Mascarar as chaves após salvar
-      if (groqKey && !groqKey.includes("•")) setGroqKey("••••••••••••••••");
-      if (openrouterKey && !openrouterKey.includes("•")) setOpenrouterKey("••••••••••••••••");
-      if (geminiKey && !geminiKey.includes("•")) setGeminiKey("••••••••••••••••");
-      if (githubToken && !githubToken.includes("•")) setGithubToken("••••••••••••••••");
-      if (greptileKey && !greptileKey.includes("•")) setGreptileKey("••••••••••••••••");
-
-      setTimeout(() => setSaved(false), 3000);
-    } catch (err) {
-      console.error("Erro ao salvar settings:", err);
-      setError("Erro ao salvar configurações");
-    }
+  const toggleKey = (key: string) => {
+    setShowKeys(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
   const handleLogout = async () => {
-    try {
-      if (supabaseClient) {
-        await supabaseClient.auth.signOut();
-      }
-    } catch (err) {
-      console.error("Erro ao fazer logout:", err);
-    }
-
-    // Limpar cookies
-    document.cookie = "sb-access-token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 UTC;";
-    document.cookie = "sb-refresh-token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 UTC;";
-
-    // Redirecionar para home
+    if (supabaseClient) await supabaseClient.auth.signOut();
     window.location.href = "/";
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-8 h-8 border-4 border-cyan-500 border-t-purple-500 rounded-full animate-spin mx-auto mb-4"></div>
-          <p>Carregando configurações...</p>
-        </div>
-      </div>
-    );
-  }
+  const tabs = [
+    { id: "conta", label: "Conta", icon: <User size={18} /> },
+    { id: "aparencia", label: "Aparência", icon: <Palette size={18} /> },
+    { id: "modelos", label: "Modelos de IA", icon: <Cpu size={18} /> },
+    { id: "api", label: "API Keys", icon: <Key size={18} /> },
+    { id: "privacidade", label: "Privacidade", icon: <Shield size={18} /> },
+    { id: "sessao", label: "Sessão", icon: <LogOut size={18} /> },
+  ];
+
+  if (loading) return (
+    <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center">
+      <div className="w-12 h-12 border-4 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin"></div>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      {/* Header */}
-      <div className="border-b border-cyan-500 p-4 flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-cyan-400">⚙️ Configurações</h1>
-        <a href="/chat" className="text-purple-400 hover:text-purple-300">
-          ← Voltar ao Chat
-        </a>
-      </div>
+    <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] flex flex-col">
+      <header className="h-16 border-b border-[var(--border-glow)] flex items-center px-6 bg-[var(--bg-secondary)] gap-4">
+        <Link href="/chat" className="p-2 hover:bg-[var(--bg-card-hover)] rounded-lg text-[var(--accent-cyan)] transition-all">
+          <ChevronLeft size={20} />
+        </Link>
+        <h1 className="font-orbitron font-black text-xl tracking-widest">CONFIGURAÇÕES</h1>
+      </header>
 
-      {/* Content */}
-      <div className="max-w-2xl mx-auto p-6">
-        {/* Error Message */}
-        {error && (
-          <div className="mb-6 p-3 bg-red-900 border border-red-500 rounded text-red-200 text-sm">
-            ❌ {error}
+      <div className="flex-1 flex overflow-hidden">
+        <aside className="w-64 border-r border-[var(--border-glow)] bg-[var(--bg-secondary)] p-4 space-y-2">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as Tab)}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-all ${
+                activeTab === tab.id 
+                ? "bg-gradient-to-r from-[var(--accent-cyan)]/20 to-[var(--accent-purple)]/20 text-[var(--accent-cyan)] border border-[var(--accent-cyan)]/30" 
+                : "text-[var(--text-secondary)] hover:bg-[var(--bg-card-hover)] hover:text-[var(--text-primary)]"
+              }`}
+            >
+              {tab.icon}
+              {tab.label}
+            </button>
+          ))}
+        </aside>
+
+        <main className="flex-1 overflow-y-auto p-8">
+          <div className="max-w-3xl mx-auto">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={activeTab}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+              >
+                {activeTab === "conta" && (
+                  <div className="space-y-8">
+                    <section className="space-y-4">
+                      <h2 className="text-xl font-orbitron font-bold text-[var(--accent-cyan)]">PERFIL</h2>
+                      <div className="flex items-center gap-6">
+                        <div className="relative group">
+                          <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-[var(--accent-cyan)] to-[var(--accent-purple)] flex items-center justify-center glow-cyan overflow-hidden">
+                            {user?.user_metadata?.avatar_url ? (
+                              <img src={user.user_metadata.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
+                            ) : (
+                              <User size={40} className="text-white" />
+                            )}
+                          </div>
+                          <button className="absolute inset-0 bg-black/50 rounded-2xl opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
+                            <Camera size={24} className="text-white" />
+                          </button>
+                        </div>
+                        <div className="space-y-2 flex-1">
+                          <label className="text-xs font-bold text-[var(--text-secondary)] uppercase">Nome de Exibição</label>
+                          <div className="flex gap-2">
+                            <input type="text" defaultValue={user?.user_metadata?.full_name || user?.email?.split('@')[0]} className="flex-1 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-lg px-4 py-2 text-sm focus:border-[var(--accent-cyan)] outline-none" />
+                            <button className="px-4 py-2 bg-[var(--accent-cyan)] text-[var(--bg-primary)] font-bold rounded-lg text-sm hover:brightness-110 transition-all">Salvar</button>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="space-y-4 p-6 bg-[var(--bg-card)] rounded-2xl border border-[var(--border-glow)]">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <p className="text-xs font-bold text-[var(--text-secondary)] uppercase">Email</p>
+                          <p className="text-sm">{user?.email}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs font-bold text-[var(--text-secondary)] uppercase">Status</p>
+                          <p className="text-sm flex items-center gap-2 justify-end">Verificado <CheckCircle2 size={14} className="text-[var(--accent-green)]" /></p>
+                        </div>
+                      </div>
+                    </section>
+                  </div>
+                )}
+
+                {activeTab === "api" && (
+                  <div className="space-y-6">
+                    <h2 className="text-xl font-orbitron font-bold text-[var(--accent-cyan)]">API KEYS</h2>
+                    {[
+                      { name: "Groq", key: "groq_key_encrypted" as keyof UserSettings },
+                      { name: "OpenRouter", key: "openrouter_key_encrypted" as keyof UserSettings },
+                      { name: "Gemini", key: "gemini_key_encrypted" as keyof UserSettings },
+                      { name: "GitHub Token", key: "github_token_encrypted" as keyof UserSettings },
+                      { name: "Greptile", key: "greptile_key_encrypted" as keyof UserSettings },
+                      { name: "Tavily", key: "tavily_key_encrypted" as keyof UserSettings }
+                    ].map(service => (
+                      <div key={service.name} className="p-6 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl space-y-4">
+                        <div className="flex justify-between items-center">
+                          <label className="text-sm font-bold">{service.name}</label>
+                          {apiKeys[service.key] && (
+                            <div className="flex items-center gap-2 text-[10px] font-bold text-[var(--accent-green)]">
+                              <CheckCircle2 size={12} /> CONFIGURADO
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <div className="relative flex-1">
+                            <input 
+                              type={showKeys[service.name] ? "text" : "password"} 
+                              placeholder={apiKeys[service.key] ? "••••••••••••••••" : `Sua chave ${service.name}`}
+                              className="w-full bg-[var(--bg-primary)] border border-[var(--border-glow)] rounded-lg px-4 py-2 text-sm focus:border-[var(--accent-cyan)] outline-none font-mono"
+                            />
+                            <button 
+                              onClick={() => toggleKey(service.name)}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)] hover:text-[var(--accent-cyan)]"
+                            >
+                              {showKeys[service.name] ? <EyeOff size={16} /> : <Eye size={16} />}
+                            </button>
+                          </div>
+                          <button className="px-4 py-2 bg-[var(--bg-secondary)] border border-[var(--border-glow)] text-xs font-bold rounded-lg hover:border-[var(--accent-cyan)] transition-all">
+                            SALVAR
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {activeTab === "aparencia" && (
+                  <div className="space-y-8">
+                    <h2 className="text-xl font-orbitron font-bold text-[var(--accent-cyan)]">TEMA</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {[
+                        { id: "cyber", name: "Cyberpunk", colors: "from-[var(--accent-cyan)] to-[var(--accent-purple)]" },
+                        { id: "dark", name: "Dark Minimal", colors: "from-gray-700 to-gray-900" },
+                        { id: "neon", name: "Neon Green", colors: "from-[var(--accent-green)] to-emerald-900" },
+                      ].map(theme => (
+                        <button key={theme.id} className="p-4 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl hover:border-[var(--accent-cyan)] transition-all group">
+                          <div className={`h-24 rounded-xl bg-gradient-to-br ${theme.colors} mb-3 group-hover:glow-cyan`} />
+                          <p className="text-sm font-bold text-center">{theme.name}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === "sessao" && (
+                  <div className="space-y-6">
+                    <h2 className="text-xl font-orbitron font-bold text-[var(--accent-cyan)]">SESSÃO</h2>
+                    <button 
+                      onClick={handleLogout}
+                      className="w-full py-4 bg-[var(--bg-card)] border border-[var(--accent-pink)]/30 text-[var(--accent-pink)] font-bold rounded-xl hover:bg-[var(--accent-pink)]/10 transition-all flex items-center justify-center gap-2"
+                    >
+                      <LogOut size={18} />
+                      Encerrar Sessão Atual
+                    </button>
+                  </div>
+                )}
+
+                {activeTab === "privacidade" && (
+                  <div className="space-y-6">
+                    <h2 className="text-xl font-orbitron font-bold text-[var(--accent-cyan)]">DADOS</h2>
+                    <button className="w-full p-6 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl flex items-center justify-between hover:border-[var(--accent-cyan)] transition-all group text-left">
+                      <div>
+                        <p className="font-bold">Exportar meus dados</p>
+                        <p className="text-xs text-[var(--text-secondary)]">Gera um arquivo JSON com conversas e memórias</p>
+                      </div>
+                      <Download className="text-[var(--text-secondary)] group-hover:text-[var(--accent-cyan)]" />
+                    </button>
+                  </div>
+                )}
+
+                {activeTab === "modelos" && (
+                  <div className="space-y-6">
+                    <h2 className="text-xl font-orbitron font-bold text-[var(--accent-cyan)]">PREFERÊNCIAS DE IA</h2>
+                    <div className="p-6 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl space-y-4">
+                      <label className="text-sm font-bold">System Prompt Customizado</label>
+                      <textarea 
+                        className="w-full h-32 bg-[var(--bg-primary)] border border-[var(--border-glow)] rounded-xl p-4 text-sm focus:border-[var(--accent-cyan)] outline-none resize-none"
+                        placeholder="Ex: Você é Zarith, uma IA hacker sarcástica..."
+                      />
+                      <button className="w-full py-3 bg-[var(--accent-cyan)] text-[var(--bg-primary)] font-bold rounded-xl hover:brightness-110 transition-all">
+                        Salvar Prompt
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            </AnimatePresence>
           </div>
-        )}
-
-        {/* API Keys Section */}
-        <div className="bg-gray-900 border border-cyan-500 rounded-lg p-6 mb-6">
-          <h2 className="text-xl font-bold mb-4 text-cyan-400">API Keys</h2>
-          <p className="text-xs text-gray-400 mb-4">
-            ⚠️ As chaves são criptografadas e armazenadas com segurança no Supabase
-          </p>
-
-          {/* Groq Key */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">Groq API Key</label>
-            <input
-              type="password"
-              value={groqKey}
-              onChange={(e) => setGroqKey(e.target.value)}
-              placeholder="gsk_..."
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
-            />
-            <p className="text-xs text-gray-400 mt-1">
-              Obtenha em: https://console.groq.com/keys
-            </p>
-          </div>
-
-          {/* OpenRouter Key */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">OpenRouter API Key</label>
-            <input
-              type="password"
-              value={openrouterKey}
-              onChange={(e) => setOpenrouterKey(e.target.value)}
-              placeholder="sk-or-..."
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
-            />
-            <p className="text-xs text-gray-400 mt-1">
-              Obtenha em: https://openrouter.ai/keys
-            </p>
-          </div>
-
-          {/* Gemini Key */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">Gemini API Key</label>
-            <input
-              type="password"
-              value={geminiKey}
-              onChange={(e) => setGeminiKey(e.target.value)}
-              placeholder="AIza..."
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
-            />
-            <p className="text-xs text-gray-400 mt-1">
-              Obtenha em: https://aistudio.google.com/app/apikey
-            </p>
-          </div>
-
-          {/* GitHub Token */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">GitHub Personal Access Token</label>
-            <input
-              type="password"
-              value={githubToken}
-              onChange={(e) => setGithubToken(e.target.value)}
-              placeholder="ghp_..."
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
-            />
-            <p className="text-xs text-gray-400 mt-1">
-              Obtenha em: https://github.com/settings/tokens
-            </p>
-          </div>
-
-          {/* Greptile Key */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">Greptile API Key</label>
-            <input
-              type="password"
-              value={greptileKey}
-              onChange={(e) => setGreptileKey(e.target.value)}
-              placeholder="gpt_..."
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
-            />
-            <p className="text-xs text-gray-400 mt-1">
-              Obtenha em: https://app.greptile.com/settings
-            </p>
-          </div>
-
-          {/* Save Button */}
-          <button
-            onClick={handleSave}
-            className="w-full bg-gradient-to-r from-cyan-500 to-purple-600 hover:from-cyan-600 hover:to-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-all duration-200 transform hover:scale-105"
-          >
-            💾 Salvar Configurações
-          </button>
-
-          {saved && (
-            <div className="mt-3 p-3 bg-green-900 border border-green-500 rounded text-green-200 text-sm">
-              ✅ Configurações salvas com segurança no Supabase!
-            </div>
-          )}
-        </div>
-
-        {/* Account Section */}
-        <div className="bg-gray-900 border border-purple-500 rounded-lg p-6">
-          <h2 className="text-xl font-bold mb-4 text-purple-400">Conta</h2>
-
-          <button
-            onClick={handleLogout}
-            className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-all duration-200"
-          >
-            🚪 Fazer Logout
-          </button>
-        </div>
+        </main>
       </div>
     </div>
   );

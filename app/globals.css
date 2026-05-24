@@ -3,35 +3,63 @@
 @tailwind utilities;
 
 :root {
-  --bg-primary: #0a0a0f;
-  --bg-secondary: #0f0f1a;
-  --accent-cyan: #00ffff;
+  --bg-primary: #020208;
+  --bg-secondary: #0a0a14;
+  --bg-card: #0d0d1a;
+  --bg-card-hover: #12122a;
+  --accent-cyan: #00f5ff;
   --accent-purple: #bf00ff;
+  --accent-pink: #ff0080;
+  --accent-green: #00ff88;
   --text-primary: #e0e0ff;
-  --border-glow: rgba(0, 255, 255, 0.3);
+  --text-secondary: #6666aa;
+  --border-glow: rgba(0, 245, 255, 0.15);
+  --glow-cyan: 0 0 20px rgba(0, 245, 255, 0.4);
+  --glow-purple: 0 0 20px rgba(191, 0, 255, 0.4);
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+@layer base {
+  body {
+    @apply bg-[var(--bg-primary)] text-[var(--text-primary)] font-sans;
+  }
 }
 
-html,
-body {
-  max-width: 100vw;
-  overflow-x: hidden;
+@layer utilities {
+  .font-orbitron {
+    font-family: var(--font-orbitron);
+  }
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+  .glow-cyan {
+    box-shadow: var(--glow-cyan);
+  }
+  .glow-purple {
+    box-shadow: var(--glow-purple);
+  }
+  .text-glow-cyan {
+    text-shadow: 0 0 10px rgba(0, 245, 255, 0.5);
+  }
+  .text-glow-purple {
+    text-shadow: 0 0 10px rgba(191, 0, 255, 0.5);
+  }
 }
 
-body {
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-family: var(--font-geist-sans);
+/* Animação da grade cyberpunk */
+.cyber-grid {
+  background-image: 
+    linear-gradient(to right, rgba(0, 245, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 245, 255, 0.08) 1px, transparent 1px);
+  background-size: 50px 50px;
+  mask-image: radial-gradient(circle at center, black, transparent 80%);
+  animation: grid-move 20s linear infinite;
 }
 
-code {
-  background: var(--bg-secondary);
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-family: var(--font-geist-mono);
+@keyframes grid-move {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 -1000px;
+  }
 }
