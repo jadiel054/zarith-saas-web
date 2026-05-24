@@ -43,22 +43,36 @@ export default function LoginPage() {
 
   const handleGitHubLogin = async () => {
     if (!supabaseClient) return;
-    await supabaseClient.auth.signInWithOAuth({
-      provider: "github",
-      options: {
-        redirectTo: `${window.location.origin}/api/auth/callback`,
-      },
-    });
+    try {
+      const { error } = await supabaseClient.auth.signInWithOAuth({
+        provider: "github",
+        options: {
+          redirectTo: 'https://zarith-saas-web.vercel.app/api/auth/callback',
+          skipBrowserRedirect: false,
+        },
+      });
+      if (error) throw error;
+    } catch (err) {
+      console.error("GitHub Login Error:", err);
+      alert("Erro ao iniciar login com GitHub. Verifique o console.");
+    }
   };
 
   const handleGoogleLogin = async () => {
     if (!supabaseClient) return;
-    await supabaseClient.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/api/auth/callback`,
-      },
-    });
+    try {
+      const { error } = await supabaseClient.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: 'https://zarith-saas-web.vercel.app/api/auth/callback',
+          skipBrowserRedirect: false,
+        },
+      });
+      if (error) throw error;
+    } catch (err) {
+      console.error("Google Login Error:", err);
+      alert("Erro ao iniciar login com Google. Verifique o console.");
+    }
   };
 
   return (
