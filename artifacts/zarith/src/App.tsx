@@ -8,6 +8,7 @@ import DashboardPage from "@/pages/dashboard";
 import SettingsPage from "@/pages/settings";
 import MemoriesPage from "@/pages/memories";
 import AdminPage from "@/pages/admin";
+import AuthCallbackPage from "@/pages/auth-callback";
 
 const queryClient = new QueryClient();
 
@@ -20,6 +21,7 @@ function Router() {
       <Route path="/settings" component={SettingsPage} />
       <Route path="/memories" component={MemoriesPage} />
       <Route path="/admin" component={AdminPage} />
+      <Route path="/api/auth/callback" component={AuthCallbackPage} />
       <Route component={NotFound} />
     </Switch>
   );

@@ -34,6 +34,9 @@ export default function LoginPage() {
   const [step, setStep] = useState<"email" | "password">("email");
   const [loading, setLoading] = useState(false);
   const [glitch, setGlitch] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const noSupabase = !supabaseClient;
 
   useEffect(() => {
     const triggerGlitch = () => {
@@ -49,7 +52,11 @@ export default function LoginPage() {
   const redirectUrl = `${window.location.origin}/api/auth/callback`;
 
   const handleGitHubLogin = async () => {
-    if (!supabaseClient) return;
+    setErrorMsg(null);
+    if (!supabaseClient) {
+      setErrorMsg("Supabase não configurado. Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY nas variáveis de ambiente.");
+      return;
+    }
     setLoading(true);
     try {
       const { error } = await supabaseClient.auth.signInWithOAuth({
@@ -58,14 +65,18 @@ export default function LoginPage() {
       });
       if (error) throw error;
     } catch (err) {
-      console.error("GitHub Login Error:", err);
-      alert("Erro ao iniciar login com GitHub.");
+      const e = err as Error;
+      setErrorMsg(e.message || "Erro ao iniciar login com GitHub.");
       setLoading(false);
     }
   };
 
   const handleGoogleLogin = async () => {
-    if (!supabaseClient) return;
+    setErrorMsg(null);
+    if (!supabaseClient) {
+      setErrorMsg("Supabase não configurado. Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY nas variáveis de ambiente.");
+      return;
+    }
     setLoading(true);
     try {
       const { error } = await supabaseClient.auth.signInWithOAuth({
@@ -74,15 +85,20 @@ export default function LoginPage() {
       });
       if (error) throw error;
     } catch (err) {
-      console.error("Google Login Error:", err);
-      alert("Erro ao iniciar login com Google.");
+      const e = err as Error;
+      setErrorMsg(e.message || "Erro ao iniciar login com Google.");
       setLoading(false);
     }
   };
 
   const checkEmail = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMsg(null);
     if (!email) return;
+    if (noSupabase) {
+      window.location.href = "/chat";
+      return;
+    }
     setLoading(true);
     setTimeout(() => {
       setStep("password");
@@ -92,19 +108,27 @@ export default function LoginPage() {
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password || !supabaseClient) return;
+    setErrorMsg(null);
+    if (!email || !password) return;
+    if (noSupabase) {
+      window.location.href = "/chat";
+      return;
+    }
     setLoading(true);
     try {
-      const { error: signInError } = await supabaseClient.auth.signInWithPassword({ email, password });
+      const { error: signInError } = await supabaseClient!.auth.signInWithPassword({ email, password });
       if (signInError) {
-        if (signInError.message.includes("Invalid login credentials") || signInError.message.includes("Email not confirmed")) {
-          const { error: signUpError } = await supabaseClient.auth.signUp({
+        if (
+          signInError.message.includes("Invalid login credentials") ||
+          signInError.message.includes("Email not confirmed")
+        ) {
+          const { error: signUpError } = await supabaseClient!.auth.signUp({
             email,
             password,
             options: { emailRedirectTo: redirectUrl },
           });
           if (signUpError) throw signUpError;
-          alert("Conta criada! Verifique seu email para confirmar ou tente logar se já confirmou.");
+          setErrorMsg("Conta criada! Verifique seu email para confirmar e depois acesse novamente.");
         } else {
           throw signInError;
         }
@@ -113,7 +137,7 @@ export default function LoginPage() {
       }
     } catch (err) {
       const error = err as Error;
-      alert(error.message || "Erro na autenticação");
+      setErrorMsg(error.message || "Erro na autenticação. Tente novamente.");
     } finally {
       setLoading(false);
     }
@@ -185,6 +209,17 @@ export default function LoginPage() {
         <div className="bg-[var(--bg-card)] border border-[var(--border-glow)] p-8 rounded-3xl shadow-2xl backdrop-blur-md relative group overflow-hidden">
           <div className="absolute -inset-0.5 bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-purple)] rounded-3xl opacity-10 group-hover:opacity-20 transition duration-1000"></div>
           <div className="space-y-6 relative">
+            {errorMsg && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-start gap-2 bg-[var(--accent-pink)]/10 border border-[var(--accent-pink)]/30 rounded-xl px-4 py-3 text-left"
+              >
+                <span className="text-[var(--accent-pink)] text-xs font-bold mt-0.5">!</span>
+                <p className="text-[var(--accent-pink)] text-xs leading-relaxed">{errorMsg}</p>
+              </motion.div>
+            )}
+
             <form onSubmit={step === "email" ? checkEmail : handleAuth} className="space-y-4">
               <div className="space-y-4">
                 <div className="relative">
