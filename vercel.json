@@ -1,0 +1,10 @@
+{
+  "buildCommand": "pnpm --filter @workspace/zarith run build",
+  "outputDirectory": "artifacts/zarith/dist/public",
+  "installCommand": "pnpm install",
+  "framework": null,
+  "env": {
+    "BASE_PATH": "/",
+    "NODE_ENV": "production"
+  }
+}
