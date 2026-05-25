@@ -49,14 +49,25 @@ interface Toast {
 let toastCounter = 0;
 
 export default function SettingsPage() {
+  const LS_PREFIX = "zarith_apikey_";
+  const LS_AVATAR = "zarith_avatar";
+  const SERVICE_KEYS: Record<string, keyof UserSettings> = {
+    "Groq": "groq_key_encrypted",
+    "OpenRouter": "openrouter_key_encrypted",
+    "Gemini": "gemini_key_encrypted",
+    "GitHub Token": "github_token_encrypted",
+    "Greptile": "greptile_key_encrypted",
+    "Tavily": "tavily_key_encrypted",
+  };
+
   const [activeTab, setActiveTab] = useState<Tab>("conta");
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
   const [keyValues, setKeyValues] = useState<Record<string, string>>({});
   const [savingKey, setSavingKey] = useState<Record<string, boolean>>({});
   const [savedKeys, setSavedKeys] = useState<Record<string, boolean>>({});
+  const [storedKeys, setStoredKeys] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<SupabaseUser | null>(null);
-  const [apiKeys] = useState<UserSettings>({});
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const [displayName, setDisplayName] = useState("");
@@ -71,6 +82,15 @@ export default function SettingsPage() {
 
   useEffect(() => {
     const loadData = async () => {
+      const stored: Record<string, boolean> = {};
+      for (const name of Object.keys(SERVICE_KEYS)) {
+        const val = localStorage.getItem(LS_PREFIX + name);
+        if (val) stored[name] = true;
+      }
+      setStoredKeys(stored);
+      const savedAvatar = localStorage.getItem(LS_AVATAR);
+      if (savedAvatar) setAvatarPreview(savedAvatar);
+
       if (!supabaseClient) { setLoading(false); return; }
       const { data: { user } } = await supabaseClient.auth.getUser();
       if (user) {
@@ -108,14 +128,14 @@ export default function SettingsPage() {
     }
     setSavingKey((prev) => ({ ...prev, [serviceName]: true }));
     try {
-      await new Promise((res) => setTimeout(res, 1200));
-      if (!supabaseClient || !user) throw new Error("Usuário não autenticado.");
+      localStorage.setItem(LS_PREFIX + serviceName, value.trim());
+      setStoredKeys((prev) => ({ ...prev, [serviceName]: true }));
       setSavedKeys((prev) => ({ ...prev, [serviceName]: true }));
       addToast("success", `Chave ${serviceName} salva com sucesso!`);
       setKeyValues((prev) => ({ ...prev, [serviceName]: "" }));
       setTimeout(() => setSavedKeys((prev) => ({ ...prev, [serviceName]: false })), 3000);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Erro desconhecido.";
+      const msg = err instanceof Error ? err.message : "Erro ao salvar chave.";
       addToast("error", `Erro ao salvar ${serviceName}: ${msg}`);
     } finally {
       setSavingKey((prev) => ({ ...prev, [serviceName]: false }));
@@ -143,12 +163,16 @@ export default function SettingsPage() {
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => setAvatarPreview(ev.target?.result as string);
-    reader.readAsDataURL(file);
     setUploadingAvatar(true);
     try {
-      await new Promise((res) => setTimeout(res, 1500));
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve(ev.target?.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      localStorage.setItem(LS_AVATAR, dataUrl);
+      setAvatarPreview(dataUrl);
       addToast("success", "Foto de perfil atualizada!");
     } catch {
       addToast("error", "Erro ao fazer upload da imagem.");
@@ -420,7 +444,7 @@ export default function SettingsPage() {
                       <div key={service.name} className="p-6 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl space-y-4 transition-all hover:border-[var(--accent-cyan)]/20">
                         <div className="flex justify-between items-center">
                           <label className="text-sm font-bold">{service.name}</label>
-                          {(apiKeys[service.key] || savedKeys[service.name]) && (
+                          {(storedKeys[service.name] || savedKeys[service.name]) && (
                             <div className="flex items-center gap-2 text-[10px] font-bold text-[var(--accent-green)]">
                               <CheckCircle2 size={12} /> CONFIGURADO
                             </div>
