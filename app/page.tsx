@@ -11,7 +11,9 @@ import {
   Shield, 
   Cpu, 
   Globe,
-  Lock
+  Lock,
+  Loader2,
+  KeyRound
 } from "lucide-react";
 import Image from "next/image";
 import { supabaseClient } from "@/lib/supabase/client";
@@ -27,6 +29,9 @@ const GoogleIcon = () => (
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [step, setStep] = useState<"email" | "password" | "signup">("email");
+  const [loading, setLoading] = useState(false);
   const [glitch, setGlitch] = useState(false);
 
   // Efeito de micro-glitch a cada 8-10 segundos
@@ -43,6 +48,7 @@ export default function LoginPage() {
 
   const handleGitHubLogin = async () => {
     if (!supabaseClient) return;
+    setLoading(true);
     try {
       const { error } = await supabaseClient.auth.signInWithOAuth({
         provider: "github",
@@ -54,12 +60,14 @@ export default function LoginPage() {
       if (error) throw error;
     } catch (err) {
       console.error("GitHub Login Error:", err);
-      alert("Erro ao iniciar login com GitHub. Verifique o console.");
+      alert("Erro ao iniciar login com GitHub.");
+      setLoading(false);
     }
   };
 
   const handleGoogleLogin = async () => {
     if (!supabaseClient) return;
+    setLoading(true);
     try {
       const { error } = await supabaseClient.auth.signInWithOAuth({
         provider: "google",
@@ -71,7 +79,64 @@ export default function LoginPage() {
       if (error) throw error;
     } catch (err) {
       console.error("Google Login Error:", err);
-      alert("Erro ao iniciar login com Google. Verifique o console.");
+      alert("Erro ao iniciar login com Google.");
+      setLoading(false);
+    }
+  };
+
+  const checkEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !supabaseClient) return;
+    
+    setLoading(true);
+    try {
+      // Simplesmente avançamos para o passo de senha.
+      // A lógica de cadastro vs login será tratada no handleAuth.
+      setStep("password");
+    } catch (err) {
+      console.error("Email check error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password || !supabaseClient) return;
+
+    setLoading(true);
+    try {
+      // Tentar login
+      const { error: signInError } = await supabaseClient.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (signInError) {
+        // Se o erro indicar que o usuário não existe ou credenciais inválidas, tentamos o cadastro
+        if (signInError.message.includes("Invalid login credentials") || signInError.message.includes("Email not confirmed")) {
+          const { error: signUpError } = await supabaseClient.auth.signUp({
+            email,
+            password,
+            options: {
+              emailRedirectTo: 'https://zarith-saas-web.vercel.app/api/auth/callback',
+            }
+          });
+          
+          if (signUpError) throw signUpError;
+          alert("Conta criada! Verifique seu email para confirmar ou tente logar se já confirmou.");
+        } else {
+          throw signInError;
+        }
+      } else {
+        // Sucesso no login
+        window.location.href = "/chat";
+      }
+    } catch (err) {
+      const error = err as Error;
+      alert(error.message || "Erro na autenticação");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -92,17 +157,10 @@ export default function LoginPage() {
         {/* Container da Zarith Avatar */}
         <div className="relative inline-block">
           <motion.div
-            animate={{ 
-              y: [0, -8, 0],
-            }}
-            transition={{ 
-              duration: 4, 
-              repeat: Infinity, 
-              ease: "easeInOut" 
-            }}
+            animate={{ y: [0, -8, 0] }}
+            transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
             className="relative"
           >
-            {/* Glow Pulsante */}
             <motion.div
               animate={{
                 boxShadow: [
@@ -111,12 +169,8 @@ export default function LoginPage() {
                   "0 0 20px #bf00ff33, 0 0 40px #00f5ff33",
                 ]
               }}
-              transition={{
-                duration: 3,
-                repeat: Infinity,
-                ease: "easeInOut"
-              }}
-              className="rounded-full overflow-hidden border-2 border-[var(--border-glow)] w-[200px] h-[200px] mx-auto relative bg-black/40 backdrop-blur-sm"
+              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+              className="rounded-full overflow-hidden border-2 border-[var(--border-glow)] w-[180px] h-[180px] mx-auto relative bg-black/40 backdrop-blur-sm"
             >
               <AnimatePresence mode="wait">
                 <motion.div
@@ -128,13 +182,7 @@ export default function LoginPage() {
                   } : {}}
                   className="w-full h-full relative"
                 >
-                  <Image 
-                    src="/zarith.png" 
-                    alt="Zarith AI" 
-                    fill
-                    className="object-cover"
-                    priority
-                  />
+                  <Image src="/zarith.png" alt="Zarith AI" fill className="object-cover" priority />
                 </motion.div>
               </AnimatePresence>
             </motion.div>
@@ -144,39 +192,86 @@ export default function LoginPage() {
         {/* Logo e Título */}
         <div className="space-y-2">
           <motion.h1 
-            className="font-orbitron font-black text-6xl tracking-[0.2em] text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-purple)] to-[var(--accent-cyan)]"
+            className="font-orbitron font-black text-5xl tracking-[0.2em] text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-purple)] to-[var(--accent-cyan)]"
             animate={glitch ? { skewX: [0, -10, 10, 0], x: [0, -2, 2, 0] } : {}}
           >
             ZARITH
           </motion.h1>
-          <p className="text-[var(--text-secondary)] font-mono text-xs tracking-widest uppercase">
+          <p className="text-[var(--text-secondary)] font-mono text-[10px] tracking-widest uppercase opacity-60">
             Neural Intelligence & SaaS Infrastructure
           </p>
         </div>
 
         {/* Card de Login */}
-        <div className="bg-[var(--bg-card)] border border-[var(--border-glow)] p-8 rounded-3xl shadow-2xl backdrop-blur-md relative group">
+        <div className="bg-[var(--bg-card)] border border-[var(--border-glow)] p-8 rounded-3xl shadow-2xl backdrop-blur-md relative group overflow-hidden">
           <div className="absolute -inset-0.5 bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-purple)] rounded-3xl opacity-10 group-hover:opacity-20 transition duration-1000"></div>
           
           <div className="space-y-6 relative">
-            <div className="space-y-4">
-              <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" size={18} />
-                <input 
-                  type="email" 
-                  placeholder="Seu e-mail de acesso" 
-                  className="w-full bg-[var(--bg-primary)] border border-[var(--border-glow)] rounded-xl py-4 pl-12 pr-4 focus:border-[var(--accent-cyan)] outline-none transition-all font-mono text-sm"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
-              <button className="w-full bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-purple)] text-[var(--bg-primary)] py-4 rounded-xl font-black tracking-widest hover:brightness-110 transition-all flex items-center justify-center gap-2 glow-cyan">
-                ACESSAR SISTEMA
-                <ArrowRight size={18} />
-              </button>
-            </div>
+            <form onSubmit={step === "email" ? checkEmail : handleAuth} className="space-y-4">
+              <div className="space-y-4">
+                <div className="relative">
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" size={18} />
+                  <input 
+                    type="email" 
+                    placeholder="Seu e-mail de acesso" 
+                    className="w-full bg-[var(--bg-primary)] border border-[var(--border-glow)] rounded-xl py-4 pl-12 pr-4 focus:border-[var(--accent-cyan)] outline-none transition-all font-mono text-sm disabled:opacity-50"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    disabled={loading || step !== "email"}
+                    required
+                  />
+                </div>
 
-            <div className="relative">
+                <AnimatePresence>
+                  {step === "password" && (
+                    <motion.div 
+                      initial={{ opacity: 0, height: 0, y: -20 }}
+                      animate={{ opacity: 1, height: "auto", y: 0 }}
+                      exit={{ opacity: 0, height: 0, y: -20 }}
+                      className="relative"
+                    >
+                      <KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" size={18} />
+                      <input 
+                        type="password" 
+                        placeholder="Sua senha" 
+                        className="w-full bg-[var(--bg-primary)] border border-[var(--border-glow)] rounded-xl py-4 pl-12 pr-4 focus:border-[var(--accent-cyan)] outline-none transition-all font-mono text-sm"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        autoFocus
+                        required
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <button 
+                  type="submit"
+                  disabled={loading}
+                  className="w-full bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-purple)] text-[var(--bg-primary)] py-4 rounded-xl font-black tracking-widest hover:brightness-110 transition-all flex items-center justify-center gap-2 glow-cyan disabled:opacity-50"
+                >
+                  {loading ? (
+                    <Loader2 className="animate-spin" size={20} />
+                  ) : (
+                    <>
+                      {step === "email" ? "ACESSAR SISTEMA" : "CONFIRMAR ACESSO"}
+                      <ArrowRight size={18} />
+                    </>
+                  )}
+                </button>
+
+                {step === "password" && (
+                  <button 
+                    type="button"
+                    onClick={() => setStep("email")}
+                    className="text-[10px] text-[var(--text-secondary)] uppercase tracking-widest hover:text-[var(--accent-cyan)] transition-colors"
+                  >
+                    Alterar e-mail
+                  </button>
+                )}
+              </div>
+            </form>
+
+            <div className="relative py-2">
               <div className="absolute inset-0 flex items-center">
                 <div className="w-full border-t border-[var(--border-glow)] opacity-30"></div>
               </div>
@@ -188,17 +283,17 @@ export default function LoginPage() {
             <div className="grid grid-cols-2 gap-4">
               <button 
                 onClick={handleGitHubLogin}
-                className="flex items-center justify-center gap-2 bg-[var(--bg-secondary)] border border-[var(--border-glow)] py-3 rounded-xl hover:border-[var(--accent-cyan)] transition-all text-xs font-bold"
+                disabled={loading}
+                className="flex items-center justify-center gap-2 bg-[var(--bg-secondary)] border border-[var(--border-glow)] py-3 rounded-xl hover:border-[var(--accent-cyan)] transition-all text-[10px] font-bold disabled:opacity-50 group"
               >
-                <GithubIcon />
-                GITHUB
+                {loading ? <Loader2 className="animate-spin" size={14} /> : <><GithubIcon /> GITHUB</>}
               </button>
               <button 
                 onClick={handleGoogleLogin}
-                className="flex items-center justify-center gap-2 bg-[var(--bg-secondary)] border border-[var(--border-glow)] py-3 rounded-xl hover:border-[var(--accent-purple)] transition-all text-xs font-bold"
+                disabled={loading}
+                className="flex items-center justify-center gap-2 bg-[var(--bg-secondary)] border border-[var(--border-glow)] py-3 rounded-xl hover:border-[var(--accent-purple)] transition-all text-[10px] font-bold disabled:opacity-50"
               >
-                <GoogleIcon />
-                GOOGLE
+                {loading ? <Loader2 className="animate-spin" size={14} /> : <><GoogleIcon /> GOOGLE</>}
               </button>
             </div>
           </div>
