@@ -8,21 +8,49 @@ export default function AuthCallbackPage() {
 
   useEffect(() => {
     const handle = async () => {
+      // Se Supabase não está configurado, redireciona para login (não para /chat)
       if (!supabaseClient) {
-        window.location.href = "/chat";
+        window.location.href = "/";
         return;
       }
 
-      const { error } = await supabaseClient.auth.exchangeCodeForSession(
-        window.location.search
-      );
+      // Extrai apenas o valor do parâmetro "code" da URL
+      // CORREÇÃO: o método espera a URL completa ou os searchParams, não a query string crua
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get("code");
+      const errorParam = params.get("error");
+      const errorDescription = params.get("error_description");
 
-      if (error) {
-        setErrorMsg(error.message);
+      // Supabase pode retornar um erro diretamente na URL (ex: acesso negado no OAuth)
+      if (errorParam) {
+        setErrorMsg(errorDescription || errorParam);
         setStatus("error");
         setTimeout(() => { window.location.href = "/"; }, 3000);
-      } else {
-        window.location.href = "/chat";
+        return;
+      }
+
+      if (!code) {
+        setErrorMsg("Código de autenticação não encontrado na URL.");
+        setStatus("error");
+        setTimeout(() => { window.location.href = "/"; }, 3000);
+        return;
+      }
+
+      try {
+        const { error } = await supabaseClient.auth.exchangeCodeForSession(code);
+
+        if (error) {
+          setErrorMsg(error.message);
+          setStatus("error");
+          setTimeout(() => { window.location.href = "/"; }, 3000);
+        } else {
+          window.location.href = "/chat";
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Erro inesperado na autenticação.";
+        setErrorMsg(message);
+        setStatus("error");
+        setTimeout(() => { window.location.href = "/"; }, 3000);
       }
     };
 
@@ -40,9 +68,9 @@ export default function AuthCallbackPage() {
         </>
       ) : (
         <>
-          <p className="text-[var(--accent-pink)] font-bold">Erro na autenticação</p>
-          <p className="text-sm text-[var(--text-secondary)]">{errorMsg}</p>
-          <p className="text-xs text-[var(--text-secondary)]">Redirecionando para o login...</p>
+          <p className="text-[var(--accent-pink)] font-bold text-lg">Erro na autenticação</p>
+          <p className="text-sm text-[var(--text-secondary)] max-w-sm text-center">{errorMsg}</p>
+          <p className="text-xs text-[var(--text-secondary)]">Redirecionando para o login em 3s...</p>
         </>
       )}
     </div>
