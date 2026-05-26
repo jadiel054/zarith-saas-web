@@ -36,7 +36,9 @@ interface SupabaseUser {
   email?: string;
   user_metadata: {
     avatar_url?: string;
+    picture?: string;
     full_name?: string;
+    name?: string;
   };
 }
 
@@ -47,6 +49,9 @@ interface Toast {
 }
 
 let toastCounter = 0;
+
+// Tamanho máximo para avatar em base64 (100KB — só para preview rápido)
+const MAX_AVATAR_B64_BYTES = 100 * 1024;
 
 export default function SettingsPage() {
   const LS_PREFIX = "zarith_apikey_";
@@ -66,12 +71,15 @@ export default function SettingsPage() {
   const [savingKey, setSavingKey] = useState<Record<string, boolean>>({});
   const [savedKeys, setSavedKeys] = useState<Record<string, boolean>>({});
   const [storedKeys, setStoredKeys] = useState<Record<string, boolean>>({});
+  const [apiKeys] = useState<UserSettings>({});
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const [displayName, setDisplayName] = useState("");
   const [savingName, setSavingName] = useState(false);
+  // CORREÇÃO: avatarPreview agora é apenas para preview visual temporário,
+  // não armazena base64 inteiro no localStorage (evita QuotaExceededError)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -82,27 +90,45 @@ export default function SettingsPage() {
 
   useEffect(() => {
     const loadData = async () => {
+      // Verifica chaves de API salvas no localStorage
       const stored: Record<string, boolean> = {};
       for (const name of Object.keys(SERVICE_KEYS)) {
         const val = localStorage.getItem(LS_PREFIX + name);
         if (val) stored[name] = true;
       }
       setStoredKeys(stored);
-      const savedAvatar = localStorage.getItem(LS_AVATAR);
-      if (savedAvatar) setAvatarPreview(savedAvatar);
 
-      if (!supabaseClient) { setLoading(false); return; }
-      const { data: { user } } = await supabaseClient.auth.getUser();
-      if (user) {
-        setUser(user as unknown as SupabaseUser);
-        setDisplayName(
-          (user as unknown as SupabaseUser).user_metadata?.full_name ||
-          user.email?.split("@")[0] || "Usuário"
-        );
+      // Carrega avatar salvo (somente se for pequeno — evita travar o browser)
+      try {
+        const savedAvatar = localStorage.getItem(LS_AVATAR);
+        if (savedAvatar && savedAvatar.length < MAX_AVATAR_B64_BYTES * 1.4) {
+          setAvatarPreview(savedAvatar);
+        }
+      } catch {
+        // Ignora erro de leitura do localStorage
       }
+
+      if (!supabaseClient) {
+        setLoading(false);
+        return;
+      }
+
+      // Proteção de rota: redireciona para login se não autenticado
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      if (!user) {
+        window.location.href = "/";
+        return;
+      }
+      setUser(user as unknown as SupabaseUser);
+      setDisplayName(
+        (user as unknown as SupabaseUser).user_metadata?.full_name ||
+        (user as unknown as SupabaseUser).user_metadata?.name ||
+        user.email?.split("@")[0] || "Usuário"
+      );
       setLoading(false);
     };
     loadData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const addToast = (type: "success" | "error", message: string) => {
@@ -147,9 +173,11 @@ export default function SettingsPage() {
     if (!displayName.trim()) return;
     setSavingName(true);
     try {
-      await new Promise((res) => setTimeout(res, 1000));
       if (supabaseClient) {
-        await supabaseClient.auth.updateUser({ data: { full_name: displayName } });
+        const { error } = await supabaseClient.auth.updateUser({
+          data: { full_name: displayName },
+        });
+        if (error) throw error;
       }
       addToast("success", "Nome atualizado com sucesso!");
     } catch (err: unknown) {
@@ -163,31 +191,81 @@ export default function SettingsPage() {
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Valida tamanho do arquivo (máx 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      addToast("error", "Imagem muito grande. Máximo 2MB.");
+      return;
+    }
+
     setUploadingAvatar(true);
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (ev) => resolve(ev.target?.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-      localStorage.setItem(LS_AVATAR, dataUrl);
+      // CORREÇÃO: Redimensiona a imagem antes de salvar, para evitar base64 gigante no localStorage
+      const bitmap = await createImageBitmap(file);
+      const canvas = document.createElement("canvas");
+      const MAX_DIM = 128; // avatar pequeno — só precisamos de 128x128
+      const scale = Math.min(MAX_DIM / bitmap.width, MAX_DIM / bitmap.height, 1);
+      canvas.width = Math.round(bitmap.width * scale);
+      canvas.height = Math.round(bitmap.height * scale);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Canvas não disponível.");
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      // Comprime para JPEG a 80% — resulta em ~5-20KB
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+
+      try {
+        localStorage.setItem(LS_AVATAR, dataUrl);
+      } catch {
+        // Se o localStorage estiver cheio, limpa apenas o avatar anterior
+        localStorage.removeItem(LS_AVATAR);
+        localStorage.setItem(LS_AVATAR, dataUrl);
+      }
+
       setAvatarPreview(dataUrl);
       addToast("success", "Foto de perfil atualizada!");
-    } catch {
-      addToast("error", "Erro ao fazer upload da imagem.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Erro ao processar imagem.";
+      addToast("error", msg);
     } finally {
       setUploadingAvatar(false);
+      // Reseta o input para permitir selecionar a mesma imagem novamente
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
     }
   };
 
+  // CORREÇÃO: handleDeleteAccount agora realmente desautentica e limpa dados locais.
+  // Nota: a deleção do usuário no lado servidor requer uma Edge Function no Supabase
+  // (service_role key), pois o cliente browser não tem permissão de admin.
+  // Esta função faz o que é possível no browser: sign out + limpeza local.
   const handleDeleteAccount = async () => {
     if (deleteConfirmText !== "EXCLUIR") return;
     setDeletingAccount(true);
     try {
-      await new Promise((res) => setTimeout(res, 1500));
-      if (supabaseClient) await supabaseClient.auth.signOut();
-      addToast("success", "Conta excluída. Redirecionando...");
+      // Limpa todos os dados locais do usuário
+      const keysToRemove: string[] = [LS_AVATAR];
+      for (const name of Object.keys(SERVICE_KEYS)) {
+        keysToRemove.push(LS_PREFIX + name);
+      }
+      keysToRemove.forEach((k) => {
+        try { localStorage.removeItem(k); } catch { /* ignora */ }
+      });
+
+      // Tenta chamar edge function de deleção (se existir)
+      if (supabaseClient) {
+        const { data: { user: currentUser } } = await supabaseClient.auth.getUser();
+        if (currentUser) {
+          // Tenta invocar função de deleção (requer setup no Supabase)
+          await supabaseClient.functions.invoke("delete-user", {
+            body: { user_id: currentUser.id },
+          }).catch(() => {
+            // Se a função não existir, apenas faz sign out
+            // O admin pode deletar manualmente pelo painel do Supabase
+          });
+        }
+        await supabaseClient.auth.signOut();
+      }
+
+      addToast("success", "Dados locais apagados. Redirecionando...");
       setTimeout(() => { window.location.href = "/"; }, 2000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Erro ao excluir conta.";
@@ -208,7 +286,7 @@ export default function SettingsPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center">
-        <div className="w-12 h-12 border-4 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin"></div>
+        <div className="w-12 h-12 border-4 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -250,13 +328,12 @@ export default function SettingsPage() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
-            onClick={(e) => { if (e.target === e.currentTarget) setShowDeleteModal(false); }}
+            onClick={(e) => { if (e.target === e.currentTarget) { setShowDeleteModal(false); setDeleteConfirmText(""); } }}
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              transition={{ type: "spring", damping: 20, stiffness: 300 }}
               className="w-full max-w-md bg-[var(--bg-secondary)] border border-red-500/40 rounded-2xl p-6 shadow-2xl"
             >
               <div className="flex items-start justify-between mb-4">
@@ -275,7 +352,8 @@ export default function SettingsPage() {
               </div>
 
               <p className="text-[var(--text-secondary)] text-sm mb-2">
-                Esta ação é <span className="text-red-400 font-bold">irreversível</span>. Todos os seus dados, chaves de API, histórico de conversas e memórias serão permanentemente apagados.
+                Esta ação limpará todos os seus dados locais e encerrará sua sessão.
+                Para remoção completa do servidor, entre em contato com o administrador.
               </p>
 
               <p className="text-xs font-bold text-[var(--text-secondary)] uppercase mt-4 mb-2">
@@ -302,9 +380,9 @@ export default function SettingsPage() {
                   className="flex-1 px-4 py-2 bg-red-500/10 border border-red-500/50 text-red-400 rounded-xl font-bold text-sm hover:bg-red-500/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {deletingAccount ? (
-                    <><Loader2 size={14} className="animate-spin" /> Excluindo...</>
+                    <><Loader2 size={14} className="animate-spin" /> Processando...</>
                   ) : (
-                    <><Trash2 size={14} /> Excluir permanentemente</>
+                    <><Trash2 size={14} /> Confirmar exclusão</>
                   )}
                 </button>
               </div>
@@ -321,7 +399,7 @@ export default function SettingsPage() {
       </header>
 
       <div className="flex-1 flex overflow-hidden">
-        <aside className="w-64 border-r border-[var(--border-glow)] bg-[var(--bg-secondary)] p-4 space-y-2">
+        <aside className="w-64 border-r border-[var(--border-glow)] bg-[var(--bg-secondary)] p-4 space-y-2 shrink-0">
           {tabs.map((tab) => (
             <button
               key={tab.id}
@@ -354,15 +432,19 @@ export default function SettingsPage() {
                     <section className="space-y-4">
                       <h2 className="text-xl font-orbitron font-bold text-[var(--accent-cyan)]">PERFIL</h2>
                       <div className="flex items-center gap-6">
-                        {/* Avatar upload */}
                         <div className="relative group shrink-0">
                           <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-[var(--accent-cyan)] to-[var(--accent-purple)] flex items-center justify-center glow-cyan overflow-hidden">
                             {uploadingAvatar ? (
                               <Loader2 size={28} className="text-white animate-spin" />
                             ) : avatarPreview ? (
                               <img src={avatarPreview} alt="Avatar" className="w-full h-full object-cover" />
-                            ) : user?.user_metadata?.avatar_url ? (
-                              <img src={user.user_metadata.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
+                            ) : user?.user_metadata?.avatar_url || user?.user_metadata?.picture ? (
+                              <img
+                                src={user.user_metadata.avatar_url || user.user_metadata.picture}
+                                alt="Avatar"
+                                className="w-full h-full object-cover"
+                                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                              />
                             ) : (
                               <User size={40} className="text-white" />
                             )}
@@ -370,7 +452,7 @@ export default function SettingsPage() {
                           <button
                             onClick={() => avatarInputRef.current?.click()}
                             className="absolute inset-0 bg-black/50 rounded-2xl opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-all gap-1"
-                            title="Alterar foto"
+                            title="Alterar foto de perfil"
                           >
                             <Camera size={20} className="text-white" />
                             <span className="text-white text-[10px] font-bold">ALTERAR</span>
@@ -378,13 +460,12 @@ export default function SettingsPage() {
                           <input
                             ref={avatarInputRef}
                             type="file"
-                            accept="image/*"
+                            accept="image/jpeg,image/png,image/webp"
                             className="hidden"
                             onChange={handleAvatarChange}
                           />
                         </div>
 
-                        {/* Display name */}
                         <div className="space-y-2 flex-1">
                           <label className="text-xs font-bold text-[var(--text-secondary)] uppercase">Nome de Exibição</label>
                           <div className="flex gap-2">
@@ -405,16 +486,18 @@ export default function SettingsPage() {
                               ) : "Salvar"}
                             </button>
                           </div>
-                          <p className="text-xs text-[var(--text-secondary)]">Clique na foto para trocar a imagem de perfil.</p>
+                          <p className="text-xs text-[var(--text-secondary)]">
+                            Passe o mouse sobre a foto para alterá-la (máx. 2MB).
+                          </p>
                         </div>
                       </div>
                     </section>
 
-                    <section className="space-y-4 p-6 bg-[var(--bg-card)] rounded-2xl border border-[var(--border-glow)]">
+                    <section className="p-6 bg-[var(--bg-card)] rounded-2xl border border-[var(--border-glow)] space-y-2">
                       <div className="flex justify-between items-center">
                         <div>
                           <p className="text-xs font-bold text-[var(--text-secondary)] uppercase">Email</p>
-                          <p className="text-sm">{user?.email || "—"}</p>
+                          <p className="text-sm font-mono">{user?.email || "—"}</p>
                         </div>
                         <div className="text-right">
                           <p className="text-xs font-bold text-[var(--text-secondary)] uppercase">Status</p>
@@ -431,6 +514,9 @@ export default function SettingsPage() {
                 {activeTab === "api" && (
                   <div className="space-y-6">
                     <h2 className="text-xl font-orbitron font-bold text-[var(--accent-cyan)]">API KEYS</h2>
+                    <p className="text-xs text-[var(--text-secondary)]">
+                      As chaves são armazenadas localmente no seu navegador (não no servidor).
+                    </p>
                     {(
                       [
                         { name: "Groq", key: "groq_key_encrypted" as keyof UserSettings },
@@ -441,7 +527,7 @@ export default function SettingsPage() {
                         { name: "Tavily", key: "tavily_key_encrypted" as keyof UserSettings },
                       ] as const
                     ).map((service) => (
-                      <div key={service.name} className="p-6 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl space-y-4 transition-all hover:border-[var(--accent-cyan)]/20">
+                      <div key={service.name} className="p-6 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl space-y-4 hover:border-[var(--accent-cyan)]/20 transition-all">
                         <div className="flex justify-between items-center">
                           <label className="text-sm font-bold">{service.name}</label>
                           {(storedKeys[service.name] || savedKeys[service.name]) && (
@@ -501,7 +587,7 @@ export default function SettingsPage() {
                       <div>
                         <h3 className="font-orbitron font-bold text-red-400 text-sm mb-1">ZONA DE PERIGO</h3>
                         <p className="text-sm text-[var(--text-secondary)]">
-                          A exclusão da conta é permanente e não pode ser desfeita. Todos os seus dados, histórico e configurações serão apagados.
+                          Limpa todos os dados locais e encerra sua sessão. Para deleção completa no servidor, entre em contato com o administrador.
                         </p>
                       </div>
                       <button
@@ -509,7 +595,7 @@ export default function SettingsPage() {
                         className="flex items-center gap-2 px-6 py-3 bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl font-bold hover:bg-red-500/20 transition-all text-sm"
                       >
                         <Trash2 size={18} />
-                        Excluir conta permanentemente
+                        Excluir conta e dados locais
                       </button>
                     </div>
                   </div>
@@ -520,7 +606,8 @@ export default function SettingsPage() {
                     <div className="w-20 h-20 bg-[var(--bg-secondary)] rounded-full flex items-center justify-center mx-auto mb-4 border border-dashed border-[var(--border-glow)]">
                       <Cpu size={32} className="text-[var(--text-secondary)]" />
                     </div>
-                    <p className="text-[var(--text-secondary)]">Em desenvolvimento.</p>
+                    <p className="text-[var(--text-secondary)] font-bold">Em desenvolvimento.</p>
+                    <p className="text-xs text-[var(--text-secondary)] mt-1">Esta seção estará disponível em breve.</p>
                   </div>
                 )}
               </motion.div>
