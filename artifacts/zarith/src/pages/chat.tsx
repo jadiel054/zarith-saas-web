@@ -173,9 +173,13 @@ export default function ChatPage() {
     setMessages((prev) => [...prev, assistantMsg]);
 
     try {
-      const groqKey   = localStorage.getItem("zarith_apikey_Groq");
-      const geminiKey = localStorage.getItem("zarith_apikey_Gemini");
-      const orKey     = localStorage.getItem("zarith_apikey_OpenRouter");
+      // Fallback duplo: localStorage primeiro, depois variáveis de ambiente
+      const groqKey   = localStorage.getItem("zarith_apikey_Groq") 
+        || import.meta.env.VITE_GROQ_API_KEY || "";
+      const geminiKey = localStorage.getItem("zarith_apikey_Gemini") 
+        || import.meta.env.VITE_GEMINI_API_KEY || "";
+      const orKey     = localStorage.getItem("zarith_apikey_OpenRouter") 
+        || import.meta.env.VITE_OPENROUTER_API_KEY || "";
 
       // Histórico de conversa (últimas 12 mensagens) + system prompt
       const history = messages.slice(-12).map((m) => ({
