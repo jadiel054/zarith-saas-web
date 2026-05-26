@@ -184,91 +184,140 @@ export default function ChatPage() {
       }));
 
       let fullResponse = "";
+      let lastError = "";
 
-      if (activeModel.id === "groq" && groqKey) {
-        const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
-          body: JSON.stringify({
-            model: "llama-3.3-70b-versatile",
-            messages: [
-              { role: "system", content: ZARITH_SYSTEM_PROMPT },
-              ...history,
-              { role: "user", content },
-            ],
-            max_tokens: 2048,
-            temperature: 0.85,
-          }),
-        });
-        if (!res.ok) throw new Error(`${res.status}`);
-        const data = await res.json() as { choices: { message: { content: string } }[] };
-        fullResponse = data.choices[0]?.message?.content ?? "Sem resposta.";
+      // Função auxiliar para tentar chamar um modelo
+      const tryModel = async (modelId: string, modelName: string): Promise<string | null> => {
+        try {
+          if (modelId === "groq" && groqKey) {
+            const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
+              body: JSON.stringify({
+                model: "llama-3.3-70b-versatile",
+                messages: [
+                  { role: "system", content: ZARITH_SYSTEM_PROMPT },
+                  ...history,
+                  { role: "user", content },
+                ],
+                max_tokens: 2048,
+                temperature: 0.85,
+              }),
+            });
+            if (!res.ok) throw new Error(`${res.status}`);
+            const data = await res.json() as { choices: { message: { content: string } }[] };
+            return data.choices[0]?.message?.content ?? "Sem resposta.";
 
-      } else if (activeModel.id === "deepseek" && orKey) {
-        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${orKey}`,
-            "HTTP-Referer": window.location.origin,
-            "X-Title": "Zarith AI",
-          },
-          body: JSON.stringify({
-            model: "deepseek/deepseek-r1",
-            messages: [
-              { role: "system", content: ZARITH_SYSTEM_PROMPT },
-              ...history,
-              { role: "user", content },
-            ],
-            max_tokens: 2048,
-          }),
-        });
-        if (!res.ok) throw new Error(`${res.status}`);
-        const data = await res.json() as { choices: { message: { content: string } }[] };
-        fullResponse = data.choices[0]?.message?.content ?? "Sem resposta.";
+          } else if (modelId === "deepseek" && orKey) {
+            const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${orKey}`,
+                "HTTP-Referer": window.location.origin,
+                "X-Title": "Zarith AI",
+              },
+              body: JSON.stringify({
+                model: "deepseek/deepseek-r1",
+                messages: [
+                  { role: "system", content: ZARITH_SYSTEM_PROMPT },
+                  ...history,
+                  { role: "user", content },
+                ],
+                max_tokens: 2048,
+              }),
+            });
+            if (!res.ok) throw new Error(`${res.status}`);
+            const data = await res.json() as { choices: { message: { content: string } }[] };
+            return data.choices[0]?.message?.content ?? "Sem resposta.";
 
-      } else if (activeModel.id === "gemini" && geminiKey) {
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [
-                { role: "user", parts: [{ text: `[SYSTEM]\n${ZARITH_SYSTEM_PROMPT}\n\n[USER]\n${content}` }] },
-              ],
-            }),
+          } else if (modelId === "gemini" && geminiKey) {
+            const res = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`,
+              {
+                method: "POST",
+                headers: { 
+                  "Content-Type": "application/json",
+                  "x-goog-api-key": geminiKey
+                },
+                body: JSON.stringify({
+                  contents: [
+                    { role: "user", parts: [{ text: `[SYSTEM]\n${ZARITH_SYSTEM_PROMPT}\n\n[USER]\n${content}` }] },
+                  ],
+                }),
+              }
+            );
+            if (!res.ok) {
+              const errorBody = await res.text();
+              console.error(`[Gemini] Status ${res.status}: ${errorBody}`);
+              throw new Error(`${res.status}: ${errorBody}`);
+            }
+            const data = await res.json() as { candidates: { content: { parts: { text: string }[] } }[] };
+            return data.candidates[0]?.content?.parts[0]?.text ?? "Sem resposta.";
+
+          } else if (modelId === "qwen" && orKey) {
+            const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${orKey}`,
+                "HTTP-Referer": window.location.origin,
+                "X-Title": "Zarith AI",
+              },
+              body: JSON.stringify({
+                model: "qwen/qwen3-coder",
+                messages: [
+                  { role: "system", content: ZARITH_SYSTEM_PROMPT },
+                  ...history,
+                  { role: "user", content },
+                ],
+                max_tokens: 2048,
+              }),
+            });
+            if (!res.ok) throw new Error(`${res.status}`);
+            const data = await res.json() as { choices: { message: { content: string } }[] };
+            return data.choices[0]?.message?.content ?? "Sem resposta.";
           }
-        );
-        if (!res.ok) throw new Error(`${res.status}`);
-        const data = await res.json() as { candidates: { content: { parts: { text: string }[] } }[] };
-        fullResponse = data.candidates[0]?.content?.parts[0]?.text ?? "Sem resposta.";
+          return null;
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : String(err);
+          return null;
+        }
+      };
 
-      } else if (activeModel.id === "qwen" && orKey) {
-        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${orKey}`,
-            "HTTP-Referer": window.location.origin,
-            "X-Title": "Zarith AI",
-          },
-          body: JSON.stringify({
-            model: "qwen/qwen3-coder:free",
-            messages: [
-              { role: "system", content: ZARITH_SYSTEM_PROMPT },
-              ...history,
-              { role: "user", content },
-            ],
-            max_tokens: 2048,
-          }),
-        });
-        if (!res.ok) throw new Error(`${res.status}`);
-        const data = await res.json() as { choices: { message: { content: string } }[] };
-        fullResponse = data.choices[0]?.message?.content ?? "Sem resposta.";
+      // Cadeia de fallback: Groq → Gemini → DeepSeek → Qwen
+      const fallbackChain = ["groq", "gemini", "deepseek", "qwen"];
 
-      } else {
-        fullResponse = `⚠️ Nenhuma chave de API configurada para **${activeModel.name}**, Jadiel. Vai em **Configurações → API Keys** e bota a chave lá. Sem chave, sem resposta — é assim que funciona.`;
+      // Tenta o modelo selecionado primeiro
+      fullResponse = await tryModel(activeModel.id, activeModel.name) ?? "";
+
+      // Se falhar, tenta a cadeia de fallback
+      if (!fullResponse) {
+        for (const modelId of fallbackChain) {
+          if (modelId === activeModel.id) continue; // Pula o que já tentou
+          const modelDef = MODELS.find(m => m.id === modelId);
+          if (modelDef) {
+            console.log(`[Fallback] Tentando ${modelDef.name}...`);
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last?.role === "assistant") {
+                last.content = `⚠️ ${activeModel.name} falhou. Tentando fallback com ${modelDef.name}...`;
+              }
+              return updated;
+            });
+            fullResponse = await tryModel(modelId, modelDef.name) ?? "";
+            if (fullResponse) {
+              console.log(`[Fallback] ${modelDef.name} respondeu com sucesso!`);
+              break;
+            }
+          }
+        }
+      }
+
+      // Se nenhum modelo respondeu
+      if (!fullResponse) {
+        fullResponse = `⚠️ Nenhuma chave de API configurada para **${activeModel.name}**, Jadiel. Vai em **Configurações → API Keys** e bota a chave lá. Sem chave, sem resposta — é assim que funciona. Erro: ${lastError}`;
       }
 
       // Streaming token a token

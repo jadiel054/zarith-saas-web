@@ -129,9 +129,9 @@ async function testGithubToken(key: string): Promise<string | null> {
 }
 
 async function testGreptileKey(key: string): Promise<string | null> {
-  // Greptile não tem endpoint de health gratuito — apenas valida o formato
-  if (!key.startsWith("gk-")) {
-    return "O formato esperado é 'gk-...' — verifique se copiou a chave correta do Greptile.";
+  // Greptile não tem endpoint de health gratuito — aceita qualquer string não vazia
+  if (!key || key.trim().length === 0) {
+    return "A chave do Greptile não pode estar vazia.";
   }
   return null; // Não conseguimos testar sem uma chamada paga
 }

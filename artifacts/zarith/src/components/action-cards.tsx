@@ -108,7 +108,7 @@ export function ActionCards({ userName, onAction }: ActionCardsProps) {
           <span className="font-orbitron font-black text-2xl text-[#020208]">Z</span>
         </div>
         <h2 className="font-orbitron font-black text-2xl md:text-3xl tracking-widest text-glow-cyan">
-          OI, {userName.toUpperCase()}
+          OI, JADIEL ALVES
         </h2>
         <p className="text-sm text-[var(--text-secondary)] max-w-sm mx-auto">
           Sou a Zarith. O que a gente vai codar hoje?
