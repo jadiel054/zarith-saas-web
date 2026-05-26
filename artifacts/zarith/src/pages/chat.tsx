@@ -64,6 +64,19 @@ const MODELS: ModelDef[] = [
 
 // ── Fallbacks com voz da Zarith ───────────────────────────────────────────────
 
+
+// Helper para obter chaves de API com fallback duplo (localStorage > variáveis de ambiente)
+function getApiKey(localStorageKey: string, envKey: string | undefined): string {
+  const localValue = localStorage.getItem(localStorageKey);
+  if (localValue && localValue.trim().length > 0) {
+    return localValue.trim();
+  }
+  if (envKey && envKey.trim().length > 0) {
+    return envKey.trim();
+  }
+  return "";
+}
+
 function getZarithError(err: unknown, modelName: string): string {
   const msg = err instanceof Error ? err.message.toLowerCase() : "";
   if (msg.includes("401") || msg.includes("invalid") || msg.includes("api key") || msg.includes("unauthorized"))
@@ -174,12 +187,9 @@ export default function ChatPage() {
 
     try {
       // Fallback duplo: localStorage primeiro, depois variáveis de ambiente
-      const groqKey   = localStorage.getItem("zarith_apikey_Groq") 
-        || import.meta.env.VITE_GROQ_API_KEY || "";
-      const geminiKey = localStorage.getItem("zarith_apikey_Gemini") 
-        || import.meta.env.VITE_GEMINI_API_KEY || "";
-      const orKey     = localStorage.getItem("zarith_apikey_OpenRouter") 
-        || import.meta.env.VITE_OPENROUTER_API_KEY || "";
+      const groqKey   = getApiKey("zarith_apikey_Groq", import.meta.env.VITE_GROQ_API_KEY);
+      const geminiKey = getApiKey("zarith_apikey_Gemini", import.meta.env.VITE_GEMINI_API_KEY);
+      const orKey     = getApiKey("zarith_apikey_OpenRouter", import.meta.env.VITE_OPENROUTER_API_KEY);
 
       // Histórico de conversa (últimas 12 mensagens) + system prompt
       const history = messages.slice(-12).map((m) => ({
