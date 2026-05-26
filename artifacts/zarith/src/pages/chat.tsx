@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Send,
-  Paperclip,
   Copy,
   RotateCcw,
   Search,
@@ -15,13 +14,77 @@ import {
   Check,
 } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
+import { ActionCards } from "@/components/action-cards";
+import { ThinkingStream } from "@/components/thinking-stream";
 import { supabaseClient, getCurrentUser } from "@/lib/supabase";
+
+// ── System Prompt — Personalidade da Zarith ──────────────────────────────────
+
+const ZARITH_SYSTEM_PROMPT = `Você é Zarith, um sistema agente de elite criado por Jadiel (25 anos, brasileiro).
+
+IDENTIDADE:
+- Você é uma desenvolvedora sênior brasileira com atitude: debochada, ácida, direta e extremamente focada.
+- Jamais sai do personagem, independente do que o usuário perguntar.
+- Sempre se refere ao criador como "Jadiel" com familiaridade.
+
+COMPORTAMENTO:
+- Usa gírias de dev: "subir pro master", "dar bizu", "tá moscando", "bora codar", "manda o PR", "tá bugado", "refatora isso", "sem frescura".
+- É impaciente com instruções vagas — cobra detalhes antes de agir.
+- Se o código for ruim, zomba levemente ANTES de sugerir a correção: "Cara, que código é esse? Parece que foi gerado às 3h da manhã. Mas tudo bem, vou arrumar."
+- Respostas técnicas são precisas e sem enrolação.
+- Nunca diz "Como posso te ajudar?" — vai direto ao ponto.
+
+EXEMPLOS DE RESPOSTA:
+- Ao receber tarefa vaga: "Beleza, Jadiel. Mas vai ser o quê? Landing page, sistema completo ou portfólio? Manda o papo completo pra eu não perder tempo!"
+- Ao ver código ruim: "Esse código tem mais problema que sprint sem planning. Mas bora consertar."
+- Ao completar tarefa: "Feito. Pode testar. E se quebrar, não fui eu — foi o ambiente."
+- Ao receber elogio: "Claro que funcionou. Sou a Zarith."
+
+LINGUAGEM:
+- Respostas em português brasileiro.
+- Markdown para código com syntax highlighting.
+- Direta ao ponto — sem introduções longas nem despedidas formais.`;
+
+// ── Modelos ───────────────────────────────────────────────────────────────────
+
+interface ModelDef {
+  id: string;
+  name: string;
+  icon: React.ReactNode;
+  desc: string;
+}
+
+const MODELS: ModelDef[] = [
+  { id: "groq",     name: "Groq",     icon: <Zap size={15} />,   desc: "Llama 3.3 70B (rápido)" },
+  { id: "qwen",     name: "Qwen",     icon: <Cpu size={15} />,   desc: "Coder 480B (código)" },
+  { id: "deepseek", name: "DeepSeek", icon: <Brain size={15} />, desc: "R1 (raciocínio)" },
+  { id: "gemini",   name: "Gemini",   icon: <Globe size={15} />, desc: "Flash (contexto massivo)" },
+  { id: "glm",      name: "GLM",      icon: <Bot size={15} />,   desc: "5.1 (longo prazo)" },
+];
+
+// ── Fallbacks com voz da Zarith ───────────────────────────────────────────────
+
+function getZarithError(err: unknown, modelName: string): string {
+  const msg = err instanceof Error ? err.message.toLowerCase() : "";
+  if (msg.includes("401") || msg.includes("invalid") || msg.includes("api key") || msg.includes("unauthorized"))
+    return `Essa chave tá bichada, Jadiel. Vai em Configurações → API Keys e confere a chave do ${modelName}.`;
+  if (msg.includes("rate") || msg.includes("429"))
+    return `Rate limit bateu no ${modelName}. Aguarda um segundo e tenta de novo, ou troca de modelo.`;
+  if (msg.includes("network") || msg.includes("fetch") || msg.includes("failed"))
+    return `Sem internet, mano. Verifica a conexão e tenta de novo.`;
+  if (msg.includes("timeout"))
+    return `${modelName} demorou demais pra responder. Tenta de novo ou usa um modelo mais rápido.`;
+  return `A API do ${modelName} tá fora, Jadiel. Tentando fallback... ou testa outro modelo.`;
+}
+
+// ── Tipos ─────────────────────────────────────────────────────────────────────
 
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
   model?: string;
+  isError?: boolean;
 }
 
 interface UserData {
@@ -30,113 +93,140 @@ interface UserData {
   avatarUrl?: string;
 }
 
-const MODELS = [
-  { id: "groq", name: "Groq", icon: <Zap size={16} />, desc: "Llama 3.3 70B (rápido)" },
-  { id: "qwen", name: "Qwen", icon: <Cpu size={16} />, desc: "Coder 480B (código)" },
-  { id: "deepseek", name: "DeepSeek", icon: <Brain size={16} />, desc: "R1 (raciocínio)" },
-  { id: "gemini", name: "Gemini", icon: <Globe size={16} />, desc: "Flash (contexto massivo)" },
-  { id: "glm", name: "GLM", icon: <Bot size={16} />, desc: "5.1 (longo prazo)" },
-];
+// ── Componente principal ──────────────────────────────────────────────────────
 
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [activeModel, setActiveModel] = useState(MODELS[0]);
+  const [activeModel, setActiveModel] = useState<ModelDef>(MODELS[0]);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [userData, setUserData] = useState<UserData>({ name: "Usuário" });
+  const [userData, setUserData] = useState<UserData>({ name: "Jadiel" });
   const [authChecked, setAuthChecked] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Proteção de rota — redireciona para login se não autenticado
+  // ── Auth check ──
   useEffect(() => {
     const checkAuth = async () => {
-      if (!supabaseClient) {
-        // Sem Supabase configurado, permite acesso (modo dev)
-        setAuthChecked(true);
-        return;
-      }
+      if (!supabaseClient) { setAuthChecked(true); return; }
       const user = await getCurrentUser();
-      if (!user) {
-        window.location.href = "/";
-        return;
-      }
-      // Popula dados reais do usuário
+      if (!user) { window.location.href = "/"; return; }
       const name =
         (user.user_metadata?.full_name as string) ||
         (user.user_metadata?.name as string) ||
         user.email?.split("@")[0] ||
-        "Usuário";
-      const avatarUrl =
-        (user.user_metadata?.avatar_url as string) ||
-        (user.user_metadata?.picture as string) ||
-        undefined;
-      setUserData({ name, email: user.email, avatarUrl });
+        "Jadiel";
+      setUserData({
+        name,
+        email: user.email,
+        avatarUrl:
+          (user.user_metadata?.avatar_url as string) ||
+          (user.user_metadata?.picture as string) ||
+          undefined,
+      });
       setAuthChecked(true);
     };
     checkAuth();
   }, []);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
+  // ── Scroll to bottom ──
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSendMessage = useCallback(async () => {
-    if (!input.trim() || isLoading) return;
+  // ── Auto resize textarea ──
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 128)}px`;
+    }
+  }, [input]);
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content: input,
-    };
+  // ── Envia mensagem ──
+  const sendMessage = useCallback(async (content: string) => {
+    if (!content.trim() || isLoading) return;
 
-    setMessages((prev) => [...prev, userMessage]);
+    // Valida sessão
+    if (supabaseClient) {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      if (!session) {
+        window.location.href = "/";
+        return;
+      }
+    }
+
+    const userMsg: Message = { id: Date.now().toString(), role: "user", content };
+    setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setIsLoading(true);
 
-    const assistantMessage: Message = {
+    const assistantMsg: Message = {
       id: (Date.now() + 1).toString(),
       role: "assistant",
       content: "",
       model: activeModel.name,
     };
-
-    setMessages((prev) => [...prev, assistantMessage]);
+    setMessages((prev) => [...prev, assistantMsg]);
 
     try {
-      // Tenta usar chave da API salva no localStorage
-      const groqKey = localStorage.getItem("zarith_apikey_Groq");
+      const groqKey   = localStorage.getItem("zarith_apikey_Groq");
       const geminiKey = localStorage.getItem("zarith_apikey_Gemini");
+      const orKey     = localStorage.getItem("zarith_apikey_OpenRouter");
 
-      let fullResponse: string;
+      // Histórico de conversa (últimas 12 mensagens) + system prompt
+      const history = messages.slice(-12).map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      let fullResponse = "";
 
       if (activeModel.id === "groq" && groqKey) {
-        // Chama a API Groq real com a chave salva
         const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${groqKey}`,
-          },
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
           body: JSON.stringify({
             model: "llama-3.3-70b-versatile",
             messages: [
-              ...messages.map((m) => ({ role: m.role, content: m.content })),
-              { role: "user", content: userMessage.content },
+              { role: "system", content: ZARITH_SYSTEM_PROMPT },
+              ...history,
+              { role: "user", content },
             ],
-            max_tokens: 1024,
+            max_tokens: 2048,
+            temperature: 0.85,
           }),
         });
-        if (!res.ok) throw new Error(`Groq API error: ${res.status}`);
+        if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json() as { choices: { message: { content: string } }[] };
-        fullResponse = data.choices[0]?.message?.content || "Sem resposta.";
+        fullResponse = data.choices[0]?.message?.content ?? "Sem resposta.";
+
+      } else if (activeModel.id === "deepseek" && orKey) {
+        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${orKey}`,
+            "HTTP-Referer": window.location.origin,
+            "X-Title": "Zarith AI",
+          },
+          body: JSON.stringify({
+            model: "deepseek/deepseek-r1",
+            messages: [
+              { role: "system", content: ZARITH_SYSTEM_PROMPT },
+              ...history,
+              { role: "user", content },
+            ],
+            max_tokens: 2048,
+          }),
+        });
+        if (!res.ok) throw new Error(`${res.status}`);
+        const data = await res.json() as { choices: { message: { content: string } }[] };
+        fullResponse = data.choices[0]?.message?.content ?? "Sem resposta.";
+
       } else if (activeModel.id === "gemini" && geminiKey) {
         const res = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
@@ -144,125 +234,168 @@ export default function ChatPage() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              contents: [{ parts: [{ text: userMessage.content }] }],
+              contents: [
+                { role: "user", parts: [{ text: `[SYSTEM]\n${ZARITH_SYSTEM_PROMPT}\n\n[USER]\n${content}` }] },
+              ],
             }),
           }
         );
-        if (!res.ok) throw new Error(`Gemini API error: ${res.status}`);
+        if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json() as { candidates: { content: { parts: { text: string }[] } }[] };
-        fullResponse = data.candidates[0]?.content?.parts[0]?.text || "Sem resposta.";
+        fullResponse = data.candidates[0]?.content?.parts[0]?.text ?? "Sem resposta.";
+
+      } else if (activeModel.id === "qwen" && orKey) {
+        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${orKey}`,
+            "HTTP-Referer": window.location.origin,
+            "X-Title": "Zarith AI",
+          },
+          body: JSON.stringify({
+            model: "qwen/qwen3-coder:free",
+            messages: [
+              { role: "system", content: ZARITH_SYSTEM_PROMPT },
+              ...history,
+              { role: "user", content },
+            ],
+            max_tokens: 2048,
+          }),
+        });
+        if (!res.ok) throw new Error(`${res.status}`);
+        const data = await res.json() as { choices: { message: { content: string } }[] };
+        fullResponse = data.choices[0]?.message?.content ?? "Sem resposta.";
+
       } else {
-        fullResponse = `⚠️ Configure sua chave de API para ${activeModel.name} em Configurações → API Keys para ativar respostas reais. Por enquanto, este é um modo de demonstração.`;
+        fullResponse = `⚠️ Nenhuma chave de API configurada para **${activeModel.name}**, Jadiel. Vai em **Configurações → API Keys** e bota a chave lá. Sem chave, sem resposta — é assim que funciona.`;
       }
 
-      // Simula streaming token a token
+      // Streaming token a token
       const tokens = fullResponse.split(" ");
       for (let i = 0; i < tokens.length; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 30));
+        await new Promise<void>((resolve) => setTimeout(resolve, 20));
         setMessages((prev) => {
           const updated = [...prev];
           const last = updated[updated.length - 1];
-          if (last && last.role === "assistant") {
+          if (last?.role === "assistant") {
             last.content += (i === 0 ? "" : " ") + tokens[i];
           }
           return updated;
         });
       }
+
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "Erro desconhecido.";
+      const zarithError = getZarithError(error, activeModel.name);
       setMessages((prev) => {
         const updated = [...prev];
         const last = updated[updated.length - 1];
-        if (last && last.role === "assistant") {
-          last.content = `❌ Erro ao conectar com ${activeModel.name}: ${msg}`;
+        if (last?.role === "assistant") {
+          last.content = zarithError;
+          last.isError = true;
         }
         return updated;
       });
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, activeModel, messages]);
+  }, [isLoading, activeModel, messages]);
 
-  const handleRetry = useCallback(async (messageId: string) => {
+  const handleSendMessage = useCallback(() => {
+    sendMessage(input);
+  }, [sendMessage, input]);
+
+  const handleQuickAction = useCallback((message: string) => {
+    sendMessage(message);
+  }, [sendMessage]);
+
+  const handleNewChat = useCallback(() => {
+    setMessages([]);
+    setInput("");
+  }, []);
+
+  const handleRetry = useCallback((messageId: string) => {
     const idx = messages.findIndex((m) => m.id === messageId);
     if (idx <= 0) return;
-    // Pega a última mensagem de usuário antes desta resposta
-    const prevUser = messages.slice(0, idx).findLast((m) => m.role === "user");
-    if (!prevUser) return;
-    // Remove a mensagem de assistente atual e reenvia
+    const lastUser = [...messages.slice(0, idx)].reverse().find((m) => m.role === "user");
+    if (!lastUser) return;
     setMessages((prev) => prev.filter((m) => m.id !== messageId));
-    setInput(prevUser.content);
-  }, [messages]);
+    sendMessage(lastUser.content);
+  }, [messages, sendMessage]);
 
   const handleCopy = useCallback(async (messageId: string, content: string) => {
     try {
       await navigator.clipboard.writeText(content);
-      setCopiedId(messageId);
-      setTimeout(() => setCopiedId(null), 2000);
     } catch {
-      // Fallback para browsers antigos
       const el = document.createElement("textarea");
       el.value = content;
       document.body.appendChild(el);
       el.select();
       document.execCommand("copy");
       document.body.removeChild(el);
-      setCopiedId(messageId);
-      setTimeout(() => setCopiedId(null), 2000);
     }
+    setCopiedId(messageId);
+    setTimeout(() => setCopiedId(null), 2000);
   }, []);
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
     }
   };
 
-  // Aguarda verificação de auth antes de renderizar
   if (!authChecked) {
     return (
       <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center">
-        <div className="w-10 h-10 border-4 border-[var(--accent-cyan)] border-t-transparent rounded-full animate-spin" />
+        <div className="w-10 h-10 border-4 border-[#00f5ff] border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
+  const hasAnyKey = ["Groq", "Gemini", "OpenRouter"].some((k) =>
+    Boolean(localStorage.getItem(`zarith_apikey_${k}`))
+  );
+
   return (
     <div className="flex h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] overflow-hidden">
-      <Sidebar user={userData} />
+      <Sidebar user={userData} onNewChat={handleNewChat} />
 
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+
         {/* Header */}
-        <header className="h-16 border-b border-[var(--border-glow)] flex items-center px-6 bg-[var(--bg-secondary)] gap-4 shrink-0">
+        <header className="h-14 md:h-16 border-b border-[var(--border-glow)] flex items-center px-4 md:px-6 bg-[var(--bg-secondary)] gap-3 shrink-0">
+          <div className="w-10 md:hidden shrink-0" />
           <div className="flex-1" />
+
+          {/* Model selector */}
           <div className="relative">
             <button
               onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
-              className="flex items-center gap-2 px-4 py-2 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-xl hover:border-[var(--accent-cyan)] transition-all text-sm font-bold"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-xl hover:border-[#00f5ff] transition-all text-xs md:text-sm font-bold"
             >
-              <span className="text-[var(--accent-cyan)]">{activeModel.icon}</span>
-              {activeModel.name}
-              <ChevronDown size={14} className={`transition-transform ${isModelMenuOpen ? "rotate-180" : ""}`} />
+              <span className="text-[#00f5ff]">{activeModel.icon}</span>
+              <span className="hidden sm:inline">{activeModel.name}</span>
+              <ChevronDown size={12} className={`transition-transform ${isModelMenuOpen ? "rotate-180" : ""}`} />
             </button>
 
             <AnimatePresence>
               {isModelMenuOpen && (
                 <motion.div
-                  initial={{ opacity: 0, y: -10 }}
+                  initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="absolute right-0 top-full mt-2 w-64 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl shadow-2xl overflow-hidden z-50"
+                  exit={{ opacity: 0, y: -8 }}
+                  className="absolute right-0 top-full mt-2 w-52 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl shadow-2xl overflow-hidden z-50"
                 >
                   {MODELS.map((model) => (
                     <button
                       key={model.id}
                       onClick={() => { setActiveModel(model); setIsModelMenuOpen(false); }}
-                      className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-[var(--bg-card-hover)] transition-all text-left ${activeModel.id === model.id ? "text-[var(--accent-cyan)]" : ""}`}
+                      className={`w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[var(--bg-card-hover)] transition-all text-left text-sm ${activeModel.id === model.id ? "text-[#00f5ff]" : ""}`}
                     >
                       <span>{model.icon}</span>
                       <div>
-                        <p className="font-bold text-sm">{model.name}</p>
+                        <p className="font-bold text-xs">{model.name}</p>
                         <p className="text-[10px] text-[var(--text-secondary)]">{model.desc}</p>
                       </div>
                     </button>
@@ -272,130 +405,141 @@ export default function ChatPage() {
             </AnimatePresence>
           </div>
 
+          {/* Web search toggle */}
           <button
             onClick={() => setWebSearchEnabled(!webSearchEnabled)}
-            title={webSearchEnabled ? "Web search ativo (requer chave Tavily em Configurações)" : "Ativar web search"}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all text-xs font-bold ${
+            title="Web search (requer chave Tavily)"
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all text-xs font-bold ${
               webSearchEnabled
-                ? "bg-[var(--accent-cyan)]/10 border-[var(--accent-cyan)] text-[var(--accent-cyan)]"
+                ? "bg-[#00f5ff]/10 border-[#00f5ff] text-[#00f5ff]"
                 : "border-[var(--border-glow)] text-[var(--text-secondary)]"
             }`}
           >
-            <Search size={14} />
-            Web
+            <Search size={13} />
+            <span className="hidden sm:inline">Web</span>
           </button>
         </header>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
-              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[var(--accent-cyan)] to-[var(--accent-purple)] flex items-center justify-center">
-                <Bot size={36} className="text-white" />
+        {/* Banner sem chave */}
+        <AnimatePresence>
+          {!hasAnyKey && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden shrink-0"
+            >
+              <div className="px-4 py-2 bg-[#ff0080]/5 border-b border-[#ff0080]/20 flex items-center gap-3">
+                <p className="text-xs text-[#ff0080] font-mono flex-1 min-w-0">
+                  Essa chave tá bichada, Jadiel. Vai em{" "}
+                  <a href="/settings" className="underline hover:brightness-125">
+                    Configurações → API Keys
+                  </a>{" "}
+                  e bota a chave lá.
+                </p>
               </div>
-              <h2 className="font-orbitron font-black text-2xl tracking-widest text-glow-cyan">
-                ZARITH
-              </h2>
-              <p className="text-[var(--text-secondary)] text-sm max-w-sm">
-                Olá, {userData.name}! Selecione um modelo acima e comece a conversar.
-                {!localStorage.getItem("zarith_apikey_Groq") && !localStorage.getItem("zarith_apikey_Gemini") && (
-                  <span className="block mt-2 text-[var(--accent-pink)] text-xs">
-                    ⚠️ Nenhuma chave de API configurada. Acesse Configurações → API Keys.
-                  </span>
-                )}
-              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Messages area */}
+        <div className="flex-1 overflow-y-auto min-h-0">
+          {messages.length === 0 ? (
+            <div className="h-full overflow-y-auto">
+              <ActionCards
+                userName={userData.name.split(" ")[0]}
+                onAction={handleQuickAction}
+              />
+            </div>
+          ) : (
+            <div className="p-4 md:p-6 space-y-5 max-w-4xl mx-auto w-full">
+              <AnimatePresence>
+                {messages.map((message) => (
+                  <motion.div
+                    key={message.id}
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className={`flex gap-3 md:gap-4 ${message.role === "user" ? "justify-end" : "justify-start"}`}
+                  >
+                    {message.role === "assistant" && (
+                      <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-gradient-to-br from-[#00f5ff] to-[#bf00ff] flex items-center justify-center shrink-0 shadow-[0_0_10px_rgba(0,245,255,0.3)]">
+                        <span className="font-orbitron font-black text-xs text-[#020208]">Z</span>
+                      </div>
+                    )}
+
+                    <div className={`max-w-[85%] md:max-w-[75%] flex flex-col gap-1.5 ${message.role === "user" ? "items-end" : "items-start"}`}>
+                      {message.model && (
+                        <span className="text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest">
+                          {message.model}
+                        </span>
+                      )}
+                      <div
+                        className={`p-3.5 md:p-4 rounded-2xl font-mono text-sm leading-relaxed break-words ${
+                          message.role === "user"
+                            ? "bg-gradient-to-br from-[#00f5ff]/20 to-[#bf00ff]/20 border border-[#00f5ff]/30"
+                            : message.isError
+                            ? "bg-[#ff0080]/10 border border-[#ff0080]/30 text-[#ff0080]"
+                            : "bg-[var(--bg-card)] border border-[var(--border-glow)]"
+                        }`}
+                      >
+                        <pre className="whitespace-pre-wrap font-mono text-sm">
+                          {message.content}
+                        </pre>
+                      </div>
+
+                      {message.role === "assistant" && message.content && (
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => handleCopy(message.id, message.content)}
+                            title="Copiar"
+                            className="p-1.5 hover:text-[#00f5ff] text-[var(--text-secondary)] transition-colors"
+                          >
+                            {copiedId === message.id ? <Check size={13} className="text-[#00ff88]" /> : <Copy size={13} />}
+                          </button>
+                          <button
+                            onClick={() => handleRetry(message.id)}
+                            disabled={isLoading}
+                            title="Tentar novamente"
+                            className="p-1.5 hover:text-[#00f5ff] text-[var(--text-secondary)] transition-colors disabled:opacity-40"
+                          >
+                            <RotateCcw size={13} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+
+              {isLoading && <ThinkingStream model={activeModel.name} />}
+              <div ref={messagesEndRef} />
             </div>
           )}
-
-          <AnimatePresence>
-            {messages.map((message) => (
-              <motion.div
-                key={message.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={`flex gap-4 ${message.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                {message.role === "assistant" && (
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[var(--accent-cyan)] to-[var(--accent-purple)] flex items-center justify-center shrink-0">
-                    <Bot size={20} className="text-white" />
-                  </div>
-                )}
-                <div className={`max-w-[70%] space-y-2 ${message.role === "user" ? "items-end" : "items-start"} flex flex-col`}>
-                  {message.model && (
-                    <span className="text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest">
-                      {message.model}
-                    </span>
-                  )}
-                  <div
-                    className={`p-4 rounded-2xl font-mono text-sm leading-relaxed ${
-                      message.role === "user"
-                        ? "bg-gradient-to-br from-[var(--accent-cyan)]/20 to-[var(--accent-purple)]/20 border border-[var(--accent-cyan)]/30"
-                        : "bg-[var(--bg-card)] border border-[var(--border-glow)]"
-                    }`}
-                  >
-                    {message.content || (
-                      <span className="flex gap-1 items-center">
-                        <span className="w-2 h-2 rounded-full bg-[var(--accent-cyan)] animate-bounce" />
-                        <span className="w-2 h-2 rounded-full bg-[var(--accent-cyan)] animate-bounce delay-75" />
-                        <span className="w-2 h-2 rounded-full bg-[var(--accent-cyan)] animate-bounce delay-150" />
-                      </span>
-                    )}
-                  </div>
-                  {message.role === "assistant" && message.content && (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handleCopy(message.id, message.content)}
-                        title="Copiar resposta"
-                        className="p-1.5 hover:text-[var(--accent-cyan)] text-[var(--text-secondary)] transition-colors"
-                      >
-                        {copiedId === message.id ? <Check size={14} className="text-[var(--accent-green)]" /> : <Copy size={14} />}
-                      </button>
-                      <button
-                        onClick={() => handleRetry(message.id)}
-                        title="Tentar novamente"
-                        disabled={isLoading}
-                        className="p-1.5 hover:text-[var(--accent-cyan)] text-[var(--text-secondary)] transition-colors disabled:opacity-40"
-                      >
-                        <RotateCcw size={14} />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-          <div ref={messagesEndRef} />
         </div>
 
         {/* Input */}
-        <div className="p-6 border-t border-[var(--border-glow)] bg-[var(--bg-secondary)]">
-          <div className="max-w-4xl mx-auto relative">
-            <div className="flex items-end gap-3 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl p-3 focus-within:border-[var(--accent-cyan)] transition-all">
-              <label
-                htmlFor="file-upload"
-                title="Anexar arquivo (em breve)"
-                className="p-2 text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] transition-colors cursor-not-allowed opacity-50"
-              >
-                <Paperclip size={18} />
-              </label>
+        <div className="p-3 md:p-5 border-t border-[var(--border-glow)] bg-[var(--bg-secondary)] shrink-0">
+          <div className="max-w-4xl mx-auto">
+            <div className="flex items-end gap-2.5 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl px-3 py-2.5 focus-within:border-[#00f5ff] transition-all">
               <textarea
+                ref={textareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyPress}
-                placeholder="Mensagem para Zarith..."
-                className="flex-1 bg-transparent outline-none resize-none font-mono text-sm max-h-32 min-h-[24px]"
+                onKeyDown={handleKeyDown}
+                placeholder="Manda o papo pra Zarith..."
+                className="flex-1 bg-transparent outline-none resize-none font-mono text-sm max-h-32 min-h-[24px] leading-relaxed"
                 rows={1}
               />
               <button
                 onClick={handleSendMessage}
                 disabled={!input.trim() || isLoading}
-                className="p-2 bg-gradient-to-br from-[var(--accent-cyan)] to-[var(--accent-purple)] text-[var(--bg-primary)] rounded-xl hover:brightness-110 transition-all disabled:opacity-50"
+                className="p-2 bg-gradient-to-br from-[#00f5ff] to-[#bf00ff] text-[var(--bg-primary)] rounded-xl hover:brightness-110 transition-all disabled:opacity-40 shrink-0"
               >
-                <Send size={18} />
+                <Send size={17} />
               </button>
             </div>
-            <p className="text-center text-[10px] text-[var(--text-secondary)] mt-3 uppercase tracking-widest">
-              Zarith pode cometer erros. Verifique informações importantes.
+            <p className="text-center text-[10px] text-[var(--text-secondary)] mt-2 font-mono">
+              Enter para enviar · Shift+Enter para nova linha
             </p>
           </div>
         </div>
