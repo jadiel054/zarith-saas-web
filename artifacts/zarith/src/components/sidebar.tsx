@@ -21,6 +21,8 @@ interface ChatSession {
 
 interface UserData {
   name: string;
+  email?: string;
+  avatarUrl?: string;
 }
 
 export function Sidebar({ user }: { user: UserData }) {
@@ -35,38 +37,47 @@ export function Sidebar({ user }: { user: UserData }) {
     s.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const displayName = user?.name || "Usuário";
+  const displayEmail = user?.email || "";
+
   return (
     <motion.div
       animate={{ width: isCollapsed ? 80 : 280 }}
-      className="h-screen bg-[var(--bg-secondary)] border-r border-[var(--border-glow)] flex flex-col relative transition-all duration-300"
+      transition={{ duration: 0.25, ease: "easeInOut" }}
+      className="h-screen bg-[var(--bg-secondary)] border-r border-[var(--border-glow)] flex flex-col relative shrink-0 overflow-hidden"
     >
-      <div className="p-4 flex items-center justify-between">
+      <div className="p-4 flex items-center justify-between shrink-0">
         {!isCollapsed && (
           <motion.span
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="font-orbitron font-black text-xl bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-purple)] bg-clip-text text-transparent"
+            exit={{ opacity: 0 }}
+            className="font-orbitron font-black text-xl bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-purple)] bg-clip-text text-transparent whitespace-nowrap"
           >
             ZARITH
           </motion.span>
         )}
         <button
           onClick={() => setIsCollapsed(!isCollapsed)}
-          className="p-2 hover:bg-[var(--bg-card-hover)] rounded-lg text-[var(--accent-cyan)] transition-colors"
+          className="p-2 hover:bg-[var(--bg-card-hover)] rounded-lg text-[var(--accent-cyan)] transition-colors shrink-0"
+          title={isCollapsed ? "Expandir sidebar" : "Recolher sidebar"}
         >
           {isCollapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
         </button>
       </div>
 
-      <div className="px-4 mb-4">
-        <button className="w-full py-3 bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-purple)] rounded-xl flex items-center justify-center gap-2 font-bold text-[var(--bg-primary)] hover:brightness-110 transition-all glow-cyan">
+      <div className="px-4 mb-4 shrink-0">
+        <button
+          className="w-full py-3 bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-purple)] rounded-xl flex items-center justify-center gap-2 font-bold text-[var(--bg-primary)] hover:brightness-110 transition-all glow-cyan"
+          title="Nova conversa"
+        >
           <Plus size={20} />
           {!isCollapsed && <span>Nova Conversa</span>}
         </button>
       </div>
 
       {!isCollapsed && (
-        <div className="px-4 mb-6">
+        <div className="px-4 mb-6 shrink-0">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" size={16} />
             <input
@@ -85,9 +96,9 @@ export function Sidebar({ user }: { user: UserData }) {
           const groupSessions = filteredSessions.filter((s) => s.group === group);
           if (groupSessions.length === 0) return null;
           return (
-            <div key={group} className="space-y-2">
+            <div key={group} className="space-y-1">
               {!isCollapsed && (
-                <h3 className="px-3 text-xs font-bold text-[var(--text-secondary)] uppercase tracking-widest">
+                <h3 className="px-3 text-xs font-bold text-[var(--text-secondary)] uppercase tracking-widest py-1">
                   {group}
                 </h3>
               )}
@@ -95,6 +106,7 @@ export function Sidebar({ user }: { user: UserData }) {
                 <div
                   key={session.id}
                   className="group flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-[var(--bg-card-hover)] cursor-pointer transition-all relative"
+                  title={isCollapsed ? session.title : undefined}
                 >
                   <MessageSquare size={18} className="text-[var(--accent-cyan)] shrink-0" />
                   {!isCollapsed && (
@@ -105,7 +117,10 @@ export function Sidebar({ user }: { user: UserData }) {
                     </div>
                   )}
                   {!isCollapsed && (
-                    <button className="opacity-0 group-hover:opacity-100 p-1 hover:text-[var(--accent-pink)] transition-all">
+                    <button
+                      className="opacity-0 group-hover:opacity-100 p-1 hover:text-[var(--accent-pink)] text-[var(--text-secondary)] transition-all shrink-0"
+                      title="Remover conversa"
+                    >
                       <Trash2 size={14} />
                     </button>
                   )}
@@ -116,18 +131,33 @@ export function Sidebar({ user }: { user: UserData }) {
         })}
       </div>
 
-      <div className="p-4 border-t border-[var(--border-glow)]">
-        <Link href="/settings" className="flex items-center gap-3 p-2 hover:bg-[var(--bg-card-hover)] rounded-xl transition-all">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[var(--accent-cyan)] to-[var(--accent-purple)] flex items-center justify-center shrink-0">
-            <User size={20} className="text-white" />
+      <div className="p-4 border-t border-[var(--border-glow)] shrink-0">
+        <Link
+          href="/settings"
+          className="flex items-center gap-3 p-2 hover:bg-[var(--bg-card-hover)] rounded-xl transition-all"
+          title={isCollapsed ? "Configurações" : undefined}
+        >
+          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[var(--accent-cyan)] to-[var(--accent-purple)] flex items-center justify-center shrink-0 overflow-hidden">
+            {user?.avatarUrl ? (
+              <img
+                src={user.avatarUrl}
+                alt={displayName}
+                className="w-full h-full object-cover"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+              />
+            ) : (
+              <User size={20} className="text-white" />
+            )}
           </div>
           {!isCollapsed && (
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold truncate">{user?.name || "Usuário"}</p>
-              <p className="text-xs text-[var(--text-secondary)] truncate">Configurações</p>
+              <p className="text-sm font-bold truncate">{displayName}</p>
+              <p className="text-xs text-[var(--text-secondary)] truncate">
+                {displayEmail || "Configurações"}
+              </p>
             </div>
           )}
-          {!isCollapsed && <Settings size={18} className="text-[var(--text-secondary)]" />}
+          {!isCollapsed && <Settings size={18} className="text-[var(--text-secondary)] shrink-0" />}
         </Link>
       </div>
     </motion.div>
