@@ -16,20 +16,14 @@ import {
   Trash2,
   AlertTriangle,
   X,
+  FlaskConical,
+  Save,
+  XCircle,
 } from "lucide-react";
 import { Link } from "wouter";
 import { supabaseClient } from "@/lib/supabase";
 
-type Tab = "conta" | "aparencia" | "modelos" | "api" | "privacidade" | "sessao";
-
-interface UserSettings {
-  groq_key_encrypted?: string;
-  openrouter_key_encrypted?: string;
-  gemini_key_encrypted?: string;
-  github_token_encrypted?: string;
-  greptile_key_encrypted?: string;
-  tavily_key_encrypted?: string;
-}
+type Tab = "conta" | "api" | "sessao";
 
 interface SupabaseUser {
   id: string;
@@ -44,81 +38,169 @@ interface SupabaseUser {
 
 interface Toast {
   id: number;
-  type: "success" | "error";
+  type: "success" | "error" | "info";
   message: string;
 }
 
-let toastCounter = 0;
+// Status possíveis de cada chave
+type KeyStatus = "idle" | "saving" | "testing" | "valid" | "invalid" | "saved";
 
-// Tamanho máximo para avatar em base64 (100KB — só para preview rápido)
+const LS_PREFIX = "zarith_apikey_";
+const LS_AVATAR = "zarith_avatar";
 const MAX_AVATAR_B64_BYTES = 100 * 1024;
 
-export default function SettingsPage() {
-  const LS_PREFIX = "zarith_apikey_";
-  const LS_AVATAR = "zarith_avatar";
-  const SERVICE_KEYS: Record<string, keyof UserSettings> = {
-    "Groq": "groq_key_encrypted",
-    "OpenRouter": "openrouter_key_encrypted",
-    "Gemini": "gemini_key_encrypted",
-    "GitHub Token": "github_token_encrypted",
-    "Greptile": "greptile_key_encrypted",
-    "Tavily": "tavily_key_encrypted",
-  };
+let toastCounter = 0;
 
+// ── Funções de validação por serviço ──────────────────────────────────────────
+// Cada uma faz uma chamada real à API e retorna null (OK) ou a mensagem de erro.
+
+async function testGroqKey(key: string): Promise<string | null> {
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/models", {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    if (res.ok) return null;
+    const body = await res.json() as { error?: { message?: string } };
+    if (res.status === 401) return `Chave inválida: ${body.error?.message || "não autorizado"}`;
+    return `Erro ${res.status}: ${body.error?.message || res.statusText}`;
+  } catch {
+    return "Erro de conexão ao validar a chave Groq.";
+  }
+}
+
+async function testGeminiKey(key: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`
+    );
+    if (res.ok) return null;
+    const body = await res.json() as { error?: { message?: string; status?: string } };
+    if (res.status === 400 || res.status === 403) return `Chave inválida: ${body.error?.message || "API key not valid"}`;
+    return `Erro ${res.status}: ${body.error?.message || res.statusText}`;
+  } catch {
+    return "Erro de conexão ao validar a chave Gemini.";
+  }
+}
+
+async function testOpenRouterKey(key: string): Promise<string | null> {
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/models", {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    if (res.ok) return null;
+    const body = await res.json() as { error?: { message?: string } };
+    if (res.status === 401) return `Chave inválida: ${body.error?.message || "não autorizado"}`;
+    return `Erro ${res.status}: ${body.error?.message || res.statusText}`;
+  } catch {
+    return "Erro de conexão ao validar a chave OpenRouter.";
+  }
+}
+
+async function testTavilyKey(key: string): Promise<string | null> {
+  try {
+    const res = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: key, query: "test", max_results: 1 }),
+    });
+    if (res.ok) return null;
+    const body = await res.json() as { detail?: string; error?: string };
+    if (res.status === 401 || res.status === 403) return `Chave inválida: ${body.detail || body.error || "não autorizado"}`;
+    return `Erro ${res.status}: ${body.detail || body.error || res.statusText}`;
+  } catch {
+    return "Erro de conexão ao validar a chave Tavily.";
+  }
+}
+
+async function testGithubToken(key: string): Promise<string | null> {
+  try {
+    const res = await fetch("https://api.github.com/user", {
+      headers: { Authorization: `Bearer ${key}`, "User-Agent": "Zarith-App" },
+    });
+    if (res.ok) {
+      const body = await res.json() as { login?: string };
+      return null; // válido — body.login seria o username
+    }
+    if (res.status === 401) return "Token inválido ou expirado.";
+    return `Erro ${res.status}: ${res.statusText}`;
+  } catch {
+    return "Erro de conexão ao validar o token GitHub.";
+  }
+}
+
+async function testGreptileKey(key: string): Promise<string | null> {
+  // Greptile não tem endpoint de health gratuito — apenas valida o formato
+  if (!key.startsWith("gk-")) {
+    return "O formato esperado é 'gk-...' — verifique se copiou a chave correta do Greptile.";
+  }
+  return null; // Não conseguimos testar sem uma chamada paga
+}
+
+const SERVICE_TESTERS: Record<string, (key: string) => Promise<string | null>> = {
+  Groq: testGroqKey,
+  Gemini: testGeminiKey,
+  OpenRouter: testOpenRouterKey,
+  Tavily: testTavilyKey,
+  "GitHub Token": testGithubToken,
+  Greptile: testGreptileKey,
+};
+
+const SERVICES = [
+  { name: "Groq",        placeholder: "gsk_...",  description: "Llama 3.3 70B — respostas rápidas" },
+  { name: "OpenRouter",  placeholder: "sk-or-...", description: "Acesso a 100+ modelos de IA" },
+  { name: "Gemini",      placeholder: "AIza...",   description: "Google Gemini Flash/Pro" },
+  { name: "GitHub Token",placeholder: "ghp_...",   description: "Análise de repositórios" },
+  { name: "Greptile",    placeholder: "gk-...",    description: "Busca semântica em código" },
+  { name: "Tavily",      placeholder: "tvly-...",  description: "Web search em tempo real" },
+];
+
+// ── Componente principal ──────────────────────────────────────────────────────
+
+export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<Tab>("conta");
-  const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
-  const [keyValues, setKeyValues] = useState<Record<string, string>>({});
-  const [savingKey, setSavingKey] = useState<Record<string, boolean>>({});
-  const [savedKeys, setSavedKeys] = useState<Record<string, boolean>>({});
-  const [storedKeys, setStoredKeys] = useState<Record<string, boolean>>({});
-  const [apiKeys] = useState<UserSettings>({});
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
+  // Conta
   const [displayName, setDisplayName] = useState("");
   const [savingName, setSavingName] = useState(false);
-  // CORREÇÃO: avatarPreview agora é apenas para preview visual temporário,
-  // não armazena base64 inteiro no localStorage (evita QuotaExceededError)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
+  // Sessão / deleção
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deletingAccount, setDeletingAccount] = useState(false);
 
+  // API Keys
+  const [keyValues, setKeyValues] = useState<Record<string, string>>({});
+  const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
+  const [keyStatus, setKeyStatus] = useState<Record<string, KeyStatus>>({});
+  const [keyError, setKeyError] = useState<Record<string, string | null>>({});
+  const [storedKeys, setStoredKeys] = useState<Record<string, boolean>>({});
+
+  // ── Init ──
   useEffect(() => {
-    const loadData = async () => {
-      // Verifica chaves de API salvas no localStorage
+    const init = async () => {
+      // Carrega status das chaves salvas
       const stored: Record<string, boolean> = {};
-      for (const name of Object.keys(SERVICE_KEYS)) {
-        const val = localStorage.getItem(LS_PREFIX + name);
-        if (val) stored[name] = true;
-      }
+      SERVICES.forEach(({ name }) => {
+        if (localStorage.getItem(LS_PREFIX + name)) stored[name] = true;
+      });
       setStoredKeys(stored);
 
-      // Carrega avatar salvo (somente se for pequeno — evita travar o browser)
+      // Carrega avatar (somente se pequeno)
       try {
-        const savedAvatar = localStorage.getItem(LS_AVATAR);
-        if (savedAvatar && savedAvatar.length < MAX_AVATAR_B64_BYTES * 1.4) {
-          setAvatarPreview(savedAvatar);
-        }
-      } catch {
-        // Ignora erro de leitura do localStorage
-      }
+        const av = localStorage.getItem(LS_AVATAR);
+        if (av && av.length < MAX_AVATAR_B64_BYTES * 1.4) setAvatarPreview(av);
+      } catch { /* ignora */ }
 
-      if (!supabaseClient) {
-        setLoading(false);
-        return;
-      }
-
-      // Proteção de rota: redireciona para login se não autenticado
+      // Sessão Supabase
+      if (!supabaseClient) { setLoading(false); return; }
       const { data: { user } } = await supabaseClient.auth.getUser();
-      if (!user) {
-        window.location.href = "/";
-        return;
-      }
+      if (!user) { window.location.href = "/"; return; }
       setUser(user as unknown as SupabaseUser);
       setDisplayName(
         (user as unknown as SupabaseUser).user_metadata?.full_name ||
@@ -127,161 +209,154 @@ export default function SettingsPage() {
       );
       setLoading(false);
     };
-    loadData();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    init();
   }, []);
 
-  const addToast = (type: "success" | "error", message: string) => {
+  // ── Toasts ──
+  const addToast = (type: Toast["type"], message: string) => {
     const id = ++toastCounter;
     setToasts((prev) => [...prev, { id, type, message }]);
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 5000);
   };
 
-  const toggleKey = (key: string) => {
-    setShowKeys((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
-
+  // ── Logout ──
   const handleLogout = async () => {
     if (supabaseClient) await supabaseClient.auth.signOut();
     window.location.href = "/";
   };
 
-  const handleSaveApiKey = async (serviceName: string, keyField: string) => {
-    const value = keyValues[serviceName] || "";
-    if (!value.trim()) {
-      addToast("error", `Informe a chave para ${serviceName}.`);
-      return;
-    }
-    setSavingKey((prev) => ({ ...prev, [serviceName]: true }));
-    try {
-      localStorage.setItem(LS_PREFIX + serviceName, value.trim());
-      setStoredKeys((prev) => ({ ...prev, [serviceName]: true }));
-      setSavedKeys((prev) => ({ ...prev, [serviceName]: true }));
-      addToast("success", `Chave ${serviceName} salva com sucesso!`);
-      setKeyValues((prev) => ({ ...prev, [serviceName]: "" }));
-      setTimeout(() => setSavedKeys((prev) => ({ ...prev, [serviceName]: false })), 3000);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Erro ao salvar chave.";
-      addToast("error", `Erro ao salvar ${serviceName}: ${msg}`);
-    } finally {
-      setSavingKey((prev) => ({ ...prev, [serviceName]: false }));
-    }
-    void keyField;
-  };
-
+  // ── Salvar nome ──
   const handleSaveName = async () => {
     if (!displayName.trim()) return;
     setSavingName(true);
     try {
       if (supabaseClient) {
-        const { error } = await supabaseClient.auth.updateUser({
-          data: { full_name: displayName },
-        });
+        const { error } = await supabaseClient.auth.updateUser({ data: { full_name: displayName } });
         if (error) throw error;
       }
       addToast("success", "Nome atualizado com sucesso!");
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Erro ao salvar nome.";
-      addToast("error", msg);
+    } catch (err) {
+      addToast("error", err instanceof Error ? err.message : "Erro ao salvar nome.");
     } finally {
       setSavingName(false);
     }
   };
 
+  // ── Avatar ──
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    // Valida tamanho do arquivo (máx 2MB)
-    if (file.size > 2 * 1024 * 1024) {
-      addToast("error", "Imagem muito grande. Máximo 2MB.");
-      return;
-    }
-
+    if (file.size > 2 * 1024 * 1024) { addToast("error", "Imagem muito grande. Máximo 2MB."); return; }
     setUploadingAvatar(true);
     try {
-      // CORREÇÃO: Redimensiona a imagem antes de salvar, para evitar base64 gigante no localStorage
       const bitmap = await createImageBitmap(file);
       const canvas = document.createElement("canvas");
-      const MAX_DIM = 128; // avatar pequeno — só precisamos de 128x128
+      const MAX_DIM = 128;
       const scale = Math.min(MAX_DIM / bitmap.width, MAX_DIM / bitmap.height, 1);
       canvas.width = Math.round(bitmap.width * scale);
       canvas.height = Math.round(bitmap.height * scale);
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Canvas não disponível.");
       ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-      // Comprime para JPEG a 80% — resulta em ~5-20KB
       const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
-
-      try {
-        localStorage.setItem(LS_AVATAR, dataUrl);
-      } catch {
-        // Se o localStorage estiver cheio, limpa apenas o avatar anterior
-        localStorage.removeItem(LS_AVATAR);
-        localStorage.setItem(LS_AVATAR, dataUrl);
-      }
-
+      try { localStorage.setItem(LS_AVATAR, dataUrl); }
+      catch { localStorage.removeItem(LS_AVATAR); localStorage.setItem(LS_AVATAR, dataUrl); }
       setAvatarPreview(dataUrl);
       addToast("success", "Foto de perfil atualizada!");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Erro ao processar imagem.";
-      addToast("error", msg);
+      addToast("error", err instanceof Error ? err.message : "Erro ao processar imagem.");
     } finally {
       setUploadingAvatar(false);
-      // Reseta o input para permitir selecionar a mesma imagem novamente
       if (avatarInputRef.current) avatarInputRef.current.value = "";
     }
   };
 
-  // CORREÇÃO: handleDeleteAccount agora realmente desautentica e limpa dados locais.
-  // Nota: a deleção do usuário no lado servidor requer uma Edge Function no Supabase
-  // (service_role key), pois o cliente browser não tem permissão de admin.
-  // Esta função faz o que é possível no browser: sign out + limpeza local.
+  // ── Salvar chave (sem testar) ──
+  const handleSaveKey = (serviceName: string) => {
+    const value = keyValues[serviceName]?.trim();
+    if (!value) { addToast("error", `Informe a chave para ${serviceName}.`); return; }
+    setKeyStatus((p) => ({ ...p, [serviceName]: "saving" }));
+    try {
+      localStorage.setItem(LS_PREFIX + serviceName, value);
+      setStoredKeys((p) => ({ ...p, [serviceName]: true }));
+      setKeyValues((p) => ({ ...p, [serviceName]: "" }));
+      setKeyStatus((p) => ({ ...p, [serviceName]: "saved" }));
+      setKeyError((p) => ({ ...p, [serviceName]: null }));
+      addToast("success", `Chave ${serviceName} salva!`);
+      setTimeout(() => setKeyStatus((p) => ({ ...p, [serviceName]: "idle" })), 3000);
+    } catch {
+      setKeyStatus((p) => ({ ...p, [serviceName]: "idle" }));
+      addToast("error", `Erro ao salvar chave ${serviceName}.`);
+    }
+  };
+
+  // ── Testar chave (valida + salva se OK) ──
+  const handleTestKey = async (serviceName: string) => {
+    const value = keyValues[serviceName]?.trim() || localStorage.getItem(LS_PREFIX + serviceName) || "";
+    if (!value) { addToast("error", `Informe ou carregue a chave de ${serviceName} para testar.`); return; }
+
+    setKeyStatus((p) => ({ ...p, [serviceName]: "testing" }));
+    setKeyError((p) => ({ ...p, [serviceName]: null }));
+
+    try {
+      const tester = SERVICE_TESTERS[serviceName];
+      const error = tester ? await tester(value) : null;
+
+      if (error) {
+        setKeyStatus((p) => ({ ...p, [serviceName]: "invalid" }));
+        setKeyError((p) => ({ ...p, [serviceName]: error }));
+        addToast("error", `${serviceName}: ${error}`);
+      } else {
+        // Chave válida — salva automaticamente
+        localStorage.setItem(LS_PREFIX + serviceName, value);
+        setStoredKeys((p) => ({ ...p, [serviceName]: true }));
+        setKeyValues((p) => ({ ...p, [serviceName]: "" }));
+        setKeyStatus((p) => ({ ...p, [serviceName]: "valid" }));
+        setKeyError((p) => ({ ...p, [serviceName]: null }));
+        addToast("success", `✓ ${serviceName} validado e salvo com sucesso!`);
+        setTimeout(() => setKeyStatus((p) => ({ ...p, [serviceName]: "idle" })), 4000);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Erro inesperado.";
+      setKeyStatus((p) => ({ ...p, [serviceName]: "invalid" }));
+      setKeyError((p) => ({ ...p, [serviceName]: msg }));
+    }
+  };
+
+  // ── Remover chave salva ──
+  const handleRemoveKey = (serviceName: string) => {
+    localStorage.removeItem(LS_PREFIX + serviceName);
+    setStoredKeys((p) => ({ ...p, [serviceName]: false }));
+    setKeyStatus((p) => ({ ...p, [serviceName]: "idle" }));
+    setKeyError((p) => ({ ...p, [serviceName]: null }));
+    addToast("info", `Chave ${serviceName} removida.`);
+  };
+
+  // ── Deletar conta ──
   const handleDeleteAccount = async () => {
     if (deleteConfirmText !== "EXCLUIR") return;
     setDeletingAccount(true);
     try {
-      // Limpa todos os dados locais do usuário
-      const keysToRemove: string[] = [LS_AVATAR];
-      for (const name of Object.keys(SERVICE_KEYS)) {
-        keysToRemove.push(LS_PREFIX + name);
-      }
-      keysToRemove.forEach((k) => {
-        try { localStorage.removeItem(k); } catch { /* ignora */ }
+      SERVICES.forEach(({ name }) => {
+        try { localStorage.removeItem(LS_PREFIX + name); } catch { /* ignora */ }
       });
+      try { localStorage.removeItem(LS_AVATAR); } catch { /* ignora */ }
 
-      // Tenta chamar edge function de deleção (se existir)
       if (supabaseClient) {
-        const { data: { user: currentUser } } = await supabaseClient.auth.getUser();
-        if (currentUser) {
-          // Tenta invocar função de deleção (requer setup no Supabase)
-          await supabaseClient.functions.invoke("delete-user", {
-            body: { user_id: currentUser.id },
-          }).catch(() => {
-            // Se a função não existir, apenas faz sign out
-            // O admin pode deletar manualmente pelo painel do Supabase
-          });
+        const { data: { user: u } } = await supabaseClient.auth.getUser();
+        if (u) {
+          await supabaseClient.functions.invoke("delete-user", { body: { user_id: u.id } })
+            .catch(() => { /* função pode não existir */ });
         }
         await supabaseClient.auth.signOut();
       }
-
-      addToast("success", "Dados locais apagados. Redirecionando...");
+      addToast("success", "Dados apagados. Redirecionando...");
       setTimeout(() => { window.location.href = "/"; }, 2000);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Erro ao excluir conta.";
-      addToast("error", msg);
+    } catch (err) {
+      addToast("error", err instanceof Error ? err.message : "Erro ao excluir conta.");
       setDeletingAccount(false);
     }
   };
-
-  const tabs = [
-    { id: "conta", label: "Conta", icon: <User size={18} /> },
-    { id: "aparencia", label: "Aparência", icon: <Palette size={18} /> },
-    { id: "modelos", label: "Modelos de IA", icon: <Cpu size={18} /> },
-    { id: "api", label: "API Keys", icon: <Key size={18} /> },
-    { id: "privacidade", label: "Privacidade", icon: <Shield size={18} /> },
-    { id: "sessao", label: "Sessão", icon: <LogOut size={18} /> },
-  ];
 
   if (loading) {
     return (
@@ -291,36 +366,38 @@ export default function SettingsPage() {
     );
   }
 
+  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+    { id: "conta",  label: "Conta",    icon: <User size={18} /> },
+    { id: "api",    label: "API Keys", icon: <Key size={18} /> },
+    { id: "sessao", label: "Sessão",   icon: <LogOut size={18} /> },
+  ];
+
   return (
     <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] flex flex-col">
-      {/* Toast container */}
+
+      {/* ── Toasts ── */}
       <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
         <AnimatePresence>
-          {toasts.map((toast) => (
+          {toasts.map((t) => (
             <motion.div
-              key={toast.id}
+              key={t.id}
               initial={{ opacity: 0, x: 60, scale: 0.9 }}
               animate={{ opacity: 1, x: 0, scale: 1 }}
               exit={{ opacity: 0, x: 60, scale: 0.9 }}
-              transition={{ duration: 0.25 }}
-              className={`pointer-events-auto flex items-center gap-3 px-5 py-3 rounded-xl border font-bold text-sm shadow-2xl backdrop-blur-sm ${
-                toast.type === "success"
-                  ? "bg-[var(--bg-card)] border-[var(--accent-green)]/40 text-[var(--accent-green)]"
-                  : "bg-[var(--bg-card)] border-[var(--accent-pink)]/40 text-[var(--accent-pink)]"
+              className={`pointer-events-auto flex items-center gap-3 px-5 py-3 rounded-xl border font-bold text-sm shadow-2xl ${
+                t.type === "success" ? "bg-[var(--bg-card)] border-[var(--accent-green)]/40 text-[var(--accent-green)]"
+                : t.type === "error"   ? "bg-[var(--bg-card)] border-[var(--accent-pink)]/40 text-[var(--accent-pink)]"
+                : "bg-[var(--bg-card)] border-[var(--accent-cyan)]/40 text-[var(--accent-cyan)]"
               }`}
             >
-              {toast.type === "success" ? (
-                <CheckCircle2 size={16} />
-              ) : (
-                <AlertTriangle size={16} />
-              )}
-              {toast.message}
+              {t.type === "success" ? <CheckCircle2 size={16} /> : t.type === "error" ? <XCircle size={16} /> : <FlaskConical size={16} />}
+              <span className="max-w-xs">{t.message}</span>
             </motion.div>
           ))}
         </AnimatePresence>
       </div>
 
-      {/* Delete account modal */}
+      {/* ── Modal de deleção ── */}
       <AnimatePresence>
         {showDeleteModal && (
           <motion.div
@@ -331,9 +408,9 @@ export default function SettingsPage() {
             onClick={(e) => { if (e.target === e.currentTarget) { setShowDeleteModal(false); setDeleteConfirmText(""); } }}
           >
             <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="w-full max-w-md bg-[var(--bg-secondary)] border border-red-500/40 rounded-2xl p-6 shadow-2xl"
             >
               <div className="flex items-start justify-between mb-4">
@@ -343,20 +420,14 @@ export default function SettingsPage() {
                   </div>
                   <h3 className="font-orbitron font-black text-lg text-red-400">EXCLUIR CONTA</h3>
                 </div>
-                <button
-                  onClick={() => { setShowDeleteModal(false); setDeleteConfirmText(""); }}
-                  className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-                >
-                  <X size={20} />
+                <button onClick={() => { setShowDeleteModal(false); setDeleteConfirmText(""); }}>
+                  <X size={20} className="text-[var(--text-secondary)]" />
                 </button>
               </div>
-
-              <p className="text-[var(--text-secondary)] text-sm mb-2">
-                Esta ação limpará todos os seus dados locais e encerrará sua sessão.
-                Para remoção completa do servidor, entre em contato com o administrador.
+              <p className="text-sm text-[var(--text-secondary)] mb-4">
+                Apaga todos os dados locais e encerra sua sessão. Para deleção completa no servidor, contate o administrador.
               </p>
-
-              <p className="text-xs font-bold text-[var(--text-secondary)] uppercase mt-4 mb-2">
+              <p className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-2">
                 Digite <span className="text-red-400">EXCLUIR</span> para confirmar
               </p>
               <input
@@ -364,26 +435,17 @@ export default function SettingsPage() {
                 value={deleteConfirmText}
                 onChange={(e) => setDeleteConfirmText(e.target.value)}
                 placeholder="EXCLUIR"
-                className="w-full bg-[var(--bg-primary)] border border-red-500/30 rounded-lg px-4 py-2 text-sm focus:border-red-500 outline-none font-mono mb-4 text-red-300 placeholder:text-red-900"
+                className="w-full bg-[var(--bg-primary)] border border-red-500/30 rounded-lg px-4 py-2 text-sm focus:border-red-500 outline-none font-mono mb-4 text-red-300"
               />
-
               <div className="flex gap-3">
-                <button
-                  onClick={() => { setShowDeleteModal(false); setDeleteConfirmText(""); }}
-                  className="flex-1 px-4 py-2 bg-[var(--bg-card)] border border-[var(--border-glow)] text-[var(--text-secondary)] rounded-xl font-bold text-sm hover:text-[var(--text-primary)] transition-all"
-                >
+                <button onClick={() => { setShowDeleteModal(false); setDeleteConfirmText(""); }}
+                  className="flex-1 px-4 py-2 bg-[var(--bg-card)] border border-[var(--border-glow)] text-[var(--text-secondary)] rounded-xl font-bold text-sm hover:text-[var(--text-primary)] transition-all">
                   Cancelar
                 </button>
-                <button
-                  onClick={handleDeleteAccount}
+                <button onClick={handleDeleteAccount}
                   disabled={deleteConfirmText !== "EXCLUIR" || deletingAccount}
-                  className="flex-1 px-4 py-2 bg-red-500/10 border border-red-500/50 text-red-400 rounded-xl font-bold text-sm hover:bg-red-500/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  {deletingAccount ? (
-                    <><Loader2 size={14} className="animate-spin" /> Processando...</>
-                  ) : (
-                    <><Trash2 size={14} /> Confirmar exclusão</>
-                  )}
+                  className="flex-1 px-4 py-2 bg-red-500/10 border border-red-500/50 text-red-400 rounded-xl font-bold text-sm hover:bg-red-500/20 transition-all disabled:opacity-40 flex items-center justify-center gap-2">
+                  {deletingAccount ? <><Loader2 size={14} className="animate-spin" /> Processando...</> : <><Trash2 size={14} /> Confirmar</>}
                 </button>
               </div>
             </motion.div>
@@ -391,7 +453,8 @@ export default function SettingsPage() {
         )}
       </AnimatePresence>
 
-      <header className="h-16 border-b border-[var(--border-glow)] flex items-center px-6 bg-[var(--bg-secondary)] gap-4">
+      {/* ── Header ── */}
+      <header className="h-16 border-b border-[var(--border-glow)] flex items-center px-6 bg-[var(--bg-secondary)] gap-4 shrink-0">
         <Link href="/chat" className="p-2 hover:bg-[var(--bg-card-hover)] rounded-lg text-[var(--accent-cyan)] transition-all">
           <ChevronLeft size={20} />
         </Link>
@@ -399,101 +462,68 @@ export default function SettingsPage() {
       </header>
 
       <div className="flex-1 flex overflow-hidden">
-        <aside className="w-64 border-r border-[var(--border-glow)] bg-[var(--bg-secondary)] p-4 space-y-2 shrink-0">
+
+        {/* ── Sidebar de abas ── */}
+        <aside className="w-56 border-r border-[var(--border-glow)] bg-[var(--bg-secondary)] p-4 space-y-2 shrink-0">
           {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as Tab)}
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-all ${
                 activeTab === tab.id
                   ? "bg-gradient-to-r from-[var(--accent-cyan)]/20 to-[var(--accent-purple)]/20 text-[var(--accent-cyan)] border border-[var(--accent-cyan)]/30"
                   : "text-[var(--text-secondary)] hover:bg-[var(--bg-card-hover)] hover:text-[var(--text-primary)]"
-              }`}
-            >
-              {tab.icon}
-              {tab.label}
+              }`}>
+              {tab.icon}{tab.label}
             </button>
           ))}
         </aside>
 
+        {/* ── Conteúdo ── */}
         <main className="flex-1 overflow-y-auto p-8">
           <div className="max-w-3xl mx-auto">
             <AnimatePresence mode="wait">
-              <motion.div
-                key={activeTab}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.2 }}
-              >
-                {/* CONTA TAB */}
+              <motion.div key={activeTab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.15 }}>
+
+                {/* ── CONTA ── */}
                 {activeTab === "conta" && (
                   <div className="space-y-8">
-                    <section className="space-y-4">
-                      <h2 className="text-xl font-orbitron font-bold text-[var(--accent-cyan)]">PERFIL</h2>
-                      <div className="flex items-center gap-6">
-                        <div className="relative group shrink-0">
-                          <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-[var(--accent-cyan)] to-[var(--accent-purple)] flex items-center justify-center glow-cyan overflow-hidden">
-                            {uploadingAvatar ? (
-                              <Loader2 size={28} className="text-white animate-spin" />
-                            ) : avatarPreview ? (
-                              <img src={avatarPreview} alt="Avatar" className="w-full h-full object-cover" />
-                            ) : user?.user_metadata?.avatar_url || user?.user_metadata?.picture ? (
-                              <img
-                                src={user.user_metadata.avatar_url || user.user_metadata.picture}
-                                alt="Avatar"
+                    <h2 className="text-xl font-orbitron font-bold text-[var(--accent-cyan)]">PERFIL</h2>
+
+                    <div className="flex items-center gap-6">
+                      <div className="relative group shrink-0">
+                        <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-[var(--accent-cyan)] to-[var(--accent-purple)] flex items-center justify-center glow-cyan overflow-hidden">
+                          {uploadingAvatar ? <Loader2 size={28} className="text-white animate-spin" />
+                            : avatarPreview ? <img src={avatarPreview} alt="Avatar" className="w-full h-full object-cover" />
+                            : (user?.user_metadata?.avatar_url || user?.user_metadata?.picture) ? (
+                              <img src={user.user_metadata.avatar_url || user.user_metadata.picture} alt="Avatar"
                                 className="w-full h-full object-cover"
-                                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                              />
-                            ) : (
-                              <User size={40} className="text-white" />
-                            )}
-                          </div>
-                          <button
-                            onClick={() => avatarInputRef.current?.click()}
-                            className="absolute inset-0 bg-black/50 rounded-2xl opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-all gap-1"
-                            title="Alterar foto de perfil"
-                          >
-                            <Camera size={20} className="text-white" />
-                            <span className="text-white text-[10px] font-bold">ALTERAR</span>
-                          </button>
-                          <input
-                            ref={avatarInputRef}
-                            type="file"
-                            accept="image/jpeg,image/png,image/webp"
-                            className="hidden"
-                            onChange={handleAvatarChange}
-                          />
+                                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                            ) : <User size={40} className="text-white" />}
                         </div>
-
-                        <div className="space-y-2 flex-1">
-                          <label className="text-xs font-bold text-[var(--text-secondary)] uppercase">Nome de Exibição</label>
-                          <div className="flex gap-2">
-                            <input
-                              type="text"
-                              value={displayName}
-                              onChange={(e) => setDisplayName(e.target.value)}
-                              onKeyDown={(e) => e.key === "Enter" && handleSaveName()}
-                              className="flex-1 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-lg px-4 py-2 text-sm focus:border-[var(--accent-cyan)] outline-none transition-colors"
-                            />
-                            <button
-                              onClick={handleSaveName}
-                              disabled={savingName || !displayName.trim()}
-                              className="px-4 py-2 bg-[var(--accent-cyan)] text-[var(--bg-primary)] font-bold rounded-lg text-sm hover:brightness-110 transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2 min-w-[90px] justify-center"
-                            >
-                              {savingName ? (
-                                <><Loader2 size={14} className="animate-spin" /> Salvando</>
-                              ) : "Salvar"}
-                            </button>
-                          </div>
-                          <p className="text-xs text-[var(--text-secondary)]">
-                            Passe o mouse sobre a foto para alterá-la (máx. 2MB).
-                          </p>
-                        </div>
+                        <button onClick={() => avatarInputRef.current?.click()}
+                          className="absolute inset-0 bg-black/50 rounded-2xl opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-all gap-1">
+                          <Camera size={20} className="text-white" />
+                          <span className="text-white text-[10px] font-bold">ALTERAR</span>
+                        </button>
+                        <input ref={avatarInputRef} type="file" accept="image/jpeg,image/png,image/webp"
+                          className="hidden" onChange={handleAvatarChange} />
                       </div>
-                    </section>
 
-                    <section className="p-6 bg-[var(--bg-card)] rounded-2xl border border-[var(--border-glow)] space-y-2">
+                      <div className="space-y-2 flex-1">
+                        <label className="text-xs font-bold text-[var(--text-secondary)] uppercase">Nome de Exibição</label>
+                        <div className="flex gap-2">
+                          <input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && handleSaveName()}
+                            className="flex-1 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-lg px-4 py-2 text-sm focus:border-[var(--accent-cyan)] outline-none transition-colors" />
+                          <button onClick={handleSaveName} disabled={savingName || !displayName.trim()}
+                            className="px-4 py-2 bg-[var(--accent-cyan)] text-[var(--bg-primary)] font-bold rounded-lg text-sm hover:brightness-110 transition-all disabled:opacity-60 flex items-center gap-2 min-w-[90px] justify-center">
+                            {savingName ? <><Loader2 size={14} className="animate-spin" /> Salvando</> : "Salvar"}
+                          </button>
+                        </div>
+                        <p className="text-xs text-[var(--text-secondary)]">Passe o mouse sobre a foto para alterá-la (máx. 2MB).</p>
+                      </div>
+                    </div>
+
+                    <div className="p-6 bg-[var(--bg-card)] rounded-2xl border border-[var(--border-glow)]">
                       <div className="flex justify-between items-center">
                         <div>
                           <p className="text-xs font-bold text-[var(--text-secondary)] uppercase">Email</p>
@@ -506,80 +536,171 @@ export default function SettingsPage() {
                           </p>
                         </div>
                       </div>
-                    </section>
+                    </div>
                   </div>
                 )}
 
-                {/* API KEYS TAB */}
+                {/* ── API KEYS ── */}
                 {activeTab === "api" && (
                   <div className="space-y-6">
-                    <h2 className="text-xl font-orbitron font-bold text-[var(--accent-cyan)]">API KEYS</h2>
-                    <p className="text-xs text-[var(--text-secondary)]">
-                      As chaves são armazenadas localmente no seu navegador (não no servidor).
-                    </p>
-                    {(
-                      [
-                        { name: "Groq", key: "groq_key_encrypted" as keyof UserSettings },
-                        { name: "OpenRouter", key: "openrouter_key_encrypted" as keyof UserSettings },
-                        { name: "Gemini", key: "gemini_key_encrypted" as keyof UserSettings },
-                        { name: "GitHub Token", key: "github_token_encrypted" as keyof UserSettings },
-                        { name: "Greptile", key: "greptile_key_encrypted" as keyof UserSettings },
-                        { name: "Tavily", key: "tavily_key_encrypted" as keyof UserSettings },
-                      ] as const
-                    ).map((service) => (
-                      <div key={service.name} className="p-6 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl space-y-4 hover:border-[var(--accent-cyan)]/20 transition-all">
-                        <div className="flex justify-between items-center">
-                          <label className="text-sm font-bold">{service.name}</label>
-                          {(storedKeys[service.name] || savedKeys[service.name]) && (
-                            <div className="flex items-center gap-2 text-[10px] font-bold text-[var(--accent-green)]">
-                              <CheckCircle2 size={12} /> CONFIGURADO
+                    <div>
+                      <h2 className="text-xl font-orbitron font-bold text-[var(--accent-cyan)]">API KEYS</h2>
+                      <p className="text-xs text-[var(--text-secondary)] mt-1">
+                        Clique em <span className="text-[var(--accent-cyan)] font-bold">Testar & Salvar</span> para validar a chave com uma chamada real à API antes de salvar.
+                        Clique em <span className="text-[var(--text-secondary)] font-bold">Salvar</span> para salvar sem testar.
+                        As chaves ficam armazenadas localmente no seu navegador.
+                      </p>
+                    </div>
+
+                    {SERVICES.map(({ name, placeholder, description }) => {
+                      const status = keyStatus[name] || "idle";
+                      const err = keyError[name];
+                      const isStored = storedKeys[name];
+                      const isWorking = status === "saving" || status === "testing";
+
+                      return (
+                        <div key={name}
+                          className={`p-6 bg-[var(--bg-card)] border rounded-2xl space-y-4 transition-all ${
+                            status === "valid"   ? "border-[var(--accent-green)]/50"
+                            : status === "invalid" ? "border-[var(--accent-pink)]/50"
+                            : status === "saved"   ? "border-[var(--accent-cyan)]/40"
+                            : "border-[var(--border-glow)] hover:border-[var(--accent-cyan)]/20"
+                          }`}>
+
+                          {/* Cabeçalho do card */}
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <p className="font-bold text-sm">{name}</p>
+                                {/* Badge de status */}
+                                {status === "valid" && (
+                                  <span className="flex items-center gap-1 text-[10px] font-bold text-[var(--accent-green)] bg-[var(--accent-green)]/10 px-2 py-0.5 rounded-full">
+                                    <CheckCircle2 size={10} /> VÁLIDA
+                                  </span>
+                                )}
+                                {status === "saved" && (
+                                  <span className="flex items-center gap-1 text-[10px] font-bold text-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10 px-2 py-0.5 rounded-full">
+                                    <CheckCircle2 size={10} /> SALVA
+                                  </span>
+                                )}
+                                {status === "invalid" && (
+                                  <span className="flex items-center gap-1 text-[10px] font-bold text-[var(--accent-pink)] bg-[var(--accent-pink)]/10 px-2 py-0.5 rounded-full">
+                                    <XCircle size={10} /> INVÁLIDA
+                                  </span>
+                                )}
+                                {status === "testing" && (
+                                  <span className="flex items-center gap-1 text-[10px] font-bold text-[var(--accent-purple)] bg-[var(--accent-purple)]/10 px-2 py-0.5 rounded-full">
+                                    <Loader2 size={10} className="animate-spin" /> TESTANDO...
+                                  </span>
+                                )}
+                                {isStored && status === "idle" && (
+                                  <span className="flex items-center gap-1 text-[10px] font-bold text-[var(--text-secondary)] bg-[var(--bg-primary)] px-2 py-0.5 rounded-full border border-[var(--border-glow)]">
+                                    CONFIGURADA
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-[var(--text-secondary)] mt-0.5">{description}</p>
                             </div>
-                          )}
-                        </div>
-                        <div className="flex gap-2">
-                          <div className="relative flex-1">
-                            <input
-                              type={showKeys[service.name] ? "text" : "password"}
-                              value={keyValues[service.name] || ""}
-                              onChange={(e) => setKeyValues((prev) => ({ ...prev, [service.name]: e.target.value }))}
-                              placeholder={apiKeys[service.key] ? "••••••••••••••••" : `Sua chave ${service.name}`}
-                              className="w-full bg-[var(--bg-primary)] border border-[var(--border-glow)] rounded-lg px-4 py-2 text-sm focus:border-[var(--accent-cyan)] outline-none font-mono pr-10 transition-colors"
-                            />
-                            <button
-                              onClick={() => toggleKey(service.name)}
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] transition-colors"
-                            >
-                              {showKeys[service.name] ? <EyeOff size={16} /> : <Eye size={16} />}
-                            </button>
+
+                            {/* Botão remover chave */}
+                            {isStored && (
+                              <button onClick={() => handleRemoveKey(name)}
+                                title="Remover chave salva"
+                                className="text-[var(--text-secondary)] hover:text-[var(--accent-pink)] transition-colors p-1">
+                                <Trash2 size={14} />
+                              </button>
+                            )}
                           </div>
-                          <button
-                            onClick={() => handleSaveApiKey(service.name, service.key)}
-                            disabled={savingKey[service.name]}
-                            className="px-4 py-2 bg-[var(--accent-cyan)] text-[var(--bg-primary)] font-bold rounded-lg text-sm hover:brightness-110 transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2 min-w-[100px] justify-center"
-                          >
-                            {savingKey[service.name] ? (
-                              <><Loader2 size={14} className="animate-spin" /> Salvando</>
-                            ) : "Salvar"}
-                          </button>
+
+                          {/* Input da chave */}
+                          <div className="flex gap-2">
+                            <div className="relative flex-1">
+                              <input
+                                type={showKeys[name] ? "text" : "password"}
+                                value={keyValues[name] || ""}
+                                onChange={(e) => {
+                                  setKeyValues((p) => ({ ...p, [name]: e.target.value }));
+                                  setKeyStatus((p) => ({ ...p, [name]: "idle" }));
+                                  setKeyError((p) => ({ ...p, [name]: null }));
+                                }}
+                                placeholder={isStored ? "••••••••••••••••  (chave salva)" : placeholder}
+                                disabled={isWorking}
+                                className={`w-full bg-[var(--bg-primary)] border rounded-lg px-4 py-2.5 text-sm outline-none font-mono pr-10 transition-colors disabled:opacity-60 ${
+                                  status === "invalid" ? "border-[var(--accent-pink)]/50 focus:border-[var(--accent-pink)]"
+                                  : "border-[var(--border-glow)] focus:border-[var(--accent-cyan)]"
+                                }`}
+                              />
+                              <button onClick={() => setShowKeys((p) => ({ ...p, [name]: !p[name] }))}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] transition-colors">
+                                {showKeys[name] ? <EyeOff size={16} /> : <Eye size={16} />}
+                              </button>
+                            </div>
+
+                            {/* Botões de ação */}
+                            <div className="flex gap-2">
+                              {/* Testar & Salvar */}
+                              <button
+                                onClick={() => handleTestKey(name)}
+                                disabled={isWorking || (!keyValues[name]?.trim() && !isStored)}
+                                title="Valida a chave com uma chamada real à API e salva se válida"
+                                className="flex items-center gap-1.5 px-3 py-2.5 bg-[var(--accent-cyan)]/10 border border-[var(--accent-cyan)]/30 text-[var(--accent-cyan)] font-bold rounded-lg text-xs hover:bg-[var(--accent-cyan)]/20 transition-all disabled:opacity-40 whitespace-nowrap"
+                              >
+                                {status === "testing"
+                                  ? <><Loader2 size={13} className="animate-spin" /> Testando</>
+                                  : <><FlaskConical size={13} /> Testar</>
+                                }
+                              </button>
+
+                              {/* Salvar (sem testar) */}
+                              <button
+                                onClick={() => handleSaveKey(name)}
+                                disabled={isWorking || !keyValues[name]?.trim()}
+                                title="Salva a chave sem validar"
+                                className="flex items-center gap-1.5 px-3 py-2.5 bg-[var(--bg-secondary)] border border-[var(--border-glow)] text-[var(--text-secondary)] font-bold rounded-lg text-xs hover:border-[var(--accent-cyan)] hover:text-[var(--accent-cyan)] transition-all disabled:opacity-40 whitespace-nowrap"
+                              >
+                                {status === "saving"
+                                  ? <><Loader2 size={13} className="animate-spin" /> Salvando</>
+                                  : <><Save size={13} /> Salvar</>
+                                }
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Mensagem de erro detalhada */}
+                          <AnimatePresence>
+                            {err && (
+                              <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: "auto" }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="flex items-start gap-2 px-3 py-2 bg-[var(--accent-pink)]/10 border border-[var(--accent-pink)]/30 rounded-lg text-xs text-[var(--accent-pink)]"
+                              >
+                                <XCircle size={14} className="shrink-0 mt-0.5" />
+                                <span>{err}</span>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 
-                {/* SESSAO TAB */}
+                {/* ── SESSÃO ── */}
                 {activeTab === "sessao" && (
                   <div className="space-y-6">
                     <h2 className="text-xl font-orbitron font-bold text-[var(--accent-cyan)]">SESSÃO</h2>
 
                     <div className="p-6 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl space-y-4">
-                      <p className="text-sm text-[var(--text-secondary)]">Encerrar sua sessão atual neste dispositivo.</p>
-                      <button
-                        onClick={handleLogout}
-                        className="flex items-center gap-2 px-6 py-3 bg-[var(--accent-pink)]/10 border border-[var(--accent-pink)]/30 text-[var(--accent-pink)] rounded-xl font-bold hover:bg-[var(--accent-pink)]/20 transition-all"
-                      >
-                        <LogOut size={18} />
-                        Encerrar Sessão
+                      <div>
+                        <p className="text-sm font-bold">Sessão ativa</p>
+                        <p className="text-xs text-[var(--text-secondary)] mt-1">
+                          Logado como <span className="font-mono text-[var(--text-primary)]">{user?.email || "—"}</span>
+                        </p>
+                      </div>
+                      <button onClick={handleLogout}
+                        className="flex items-center gap-2 px-6 py-3 bg-[var(--accent-pink)]/10 border border-[var(--accent-pink)]/30 text-[var(--accent-pink)] rounded-xl font-bold hover:bg-[var(--accent-pink)]/20 transition-all">
+                        <LogOut size={18} /> Encerrar Sessão
                       </button>
                     </div>
 
@@ -587,29 +708,17 @@ export default function SettingsPage() {
                       <div>
                         <h3 className="font-orbitron font-bold text-red-400 text-sm mb-1">ZONA DE PERIGO</h3>
                         <p className="text-sm text-[var(--text-secondary)]">
-                          Limpa todos os dados locais e encerra sua sessão. Para deleção completa no servidor, entre em contato com o administrador.
+                          Apaga todos os dados locais (chaves de API, avatar) e encerra sua sessão.
                         </p>
                       </div>
-                      <button
-                        onClick={() => setShowDeleteModal(true)}
-                        className="flex items-center gap-2 px-6 py-3 bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl font-bold hover:bg-red-500/20 transition-all text-sm"
-                      >
-                        <Trash2 size={18} />
-                        Excluir conta e dados locais
+                      <button onClick={() => setShowDeleteModal(true)}
+                        className="flex items-center gap-2 px-6 py-3 bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl font-bold hover:bg-red-500/20 transition-all text-sm">
+                        <Trash2 size={18} /> Excluir conta e dados locais
                       </button>
                     </div>
                   </div>
                 )}
 
-                {(activeTab === "aparencia" || activeTab === "modelos" || activeTab === "privacidade") && (
-                  <div className="flex flex-col items-center justify-center py-20 text-center">
-                    <div className="w-20 h-20 bg-[var(--bg-secondary)] rounded-full flex items-center justify-center mx-auto mb-4 border border-dashed border-[var(--border-glow)]">
-                      <Cpu size={32} className="text-[var(--text-secondary)]" />
-                    </div>
-                    <p className="text-[var(--text-secondary)] font-bold">Em desenvolvimento.</p>
-                    <p className="text-xs text-[var(--text-secondary)] mt-1">Esta seção estará disponível em breve.</p>
-                  </div>
-                )}
               </motion.div>
             </AnimatePresence>
           </div>
