@@ -241,9 +241,17 @@ export default function ChatPage() {
                   "x-goog-api-key": geminiKey
                 },
                 body: JSON.stringify({
-                  contents: [
-                    { role: "user", parts: [{ text: `[SYSTEM]\n${ZARITH_SYSTEM_PROMPT}\n\n[USER]\n${content}` }] },
-                  ],
+                  systemInstruction: {
+                    parts: [{ text: ZARITH_SYSTEM_PROMPT }]
+                  },
+                  contents: history.map(m => ({
+                    role: m.role === 'assistant' ? 'model' : 'user',
+                    parts: [{ text: m.content }]
+                  })).concat([{
+                    role: 'user',
+                    parts: [{ text: content }]
+                  }]),
+                  generationConfig: { maxOutputTokens: 2048 }
                 }),
               }
             );
@@ -266,6 +274,29 @@ export default function ChatPage() {
               },
               body: JSON.stringify({
                 model: "qwen/qwen3-coder",
+                messages: [
+                  { role: "system", content: ZARITH_SYSTEM_PROMPT },
+                  ...history,
+                  { role: "user", content },
+                ],
+                max_tokens: 2048,
+              }),
+            });
+            if (!res.ok) throw new Error(`${res.status}`);
+            const data = await res.json() as { choices: { message: { content: string } }[] };
+            return data.choices[0]?.message?.content ?? "Sem resposta.";
+
+          } else if (modelId === "glm" && orKey) {
+            const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${orKey}`,
+                "HTTP-Referer": window.location.origin,
+                "X-Title": "Zarith AI",
+              },
+              body: JSON.stringify({
+                model: "zhipu/glm-4-turbo",
                 messages: [
                   { role: "system", content: ZARITH_SYSTEM_PROMPT },
                   ...history,
