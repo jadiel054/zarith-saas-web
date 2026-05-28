@@ -108,6 +108,13 @@ interface UserData {
 
 // ── Componente principal ──────────────────────────────────────────────────────
 
+interface ChatSession {
+  id: string;
+  title: string;
+  date: string;
+  group: "Hoje" | "Ontem" | "Semana passada" | "Mais antigos";
+}
+
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -119,8 +126,82 @@ export default function ChatPage() {
   const [userData, setUserData] = useState<UserData>({ name: "Jadiel" });
   const [authChecked, setAuthChecked] = useState(false);
 
+  // Estados de persistência
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // ── Persistência: Carregar sessões iniciais ──
+  useEffect(() => {
+    const savedSessions = localStorage.getItem("zarith_sessions");
+    if (savedSessions) {
+      try {
+        setSessions(JSON.parse(savedSessions));
+      } catch (e) {
+        console.error("Erro ao carregar sessões", e);
+      }
+    }
+  }, []);
+
+  // ── Persistência: Salvar sessões quando mudarem ──
+  useEffect(() => {
+    localStorage.setItem("zarith_sessions", JSON.stringify(sessions));
+  }, [sessions]);
+
+  // ── Persistência: Salvar mensagens da sessão atual ──
+  useEffect(() => {
+    if (currentSessionId && messages.length > 0) {
+      localStorage.setItem(`zarith_chat_${currentSessionId}`, JSON.stringify(messages));
+      
+      // Atualizar título da sessão se for a primeira mensagem
+      if (messages.length >= 2) {
+        setSessions(prev => prev.map(s => {
+          if (s.id === currentSessionId && s.title === "Nova conversa") {
+            const firstUserMsg = messages.find(m => m.role === "user");
+            return { ...s, title: firstUserMsg?.content.substring(0, 30) || "Nova conversa" };
+          }
+          return s;
+        }));
+      }
+    }
+  }, [messages, currentSessionId]);
+
+  // ── Funções de Navegação ──
+  const loadConversation = useCallback((id: string) => {
+    const savedMessages = localStorage.getItem(`zarith_chat_${id}`);
+    if (savedMessages) {
+      try {
+        setMessages(JSON.parse(savedMessages));
+        setCurrentSessionId(id);
+      } catch (e) {
+        console.error("Erro ao carregar mensagens da sessão", e);
+      }
+    }
+  }, []);
+
+  const handleNewChat = useCallback(() => {
+    const newId = Date.now().toString();
+    const newSession: ChatSession = {
+      id: newId,
+      title: "Nova conversa",
+      date: new Date().toISOString().split("T")[0],
+      group: "Hoje"
+    };
+    setSessions(prev => [newSession, ...prev]);
+    setCurrentSessionId(newId);
+    setMessages([]);
+  }, []);
+
+  const handleDeleteSession = useCallback((id: string) => {
+    setSessions(prev => prev.filter(s => s.id !== id));
+    localStorage.removeItem(`zarith_chat_${id}`);
+    if (currentSessionId === id) {
+      setCurrentSessionId(null);
+      setMessages([]);
+    }
+  }, [currentSessionId]);
 
   // ── Auth check ──
   useEffect(() => {
@@ -170,6 +251,20 @@ export default function ChatPage() {
         window.location.href = "/";
         return;
       }
+    }
+
+    // Se não houver sessão ativa, cria uma
+    let sessionId = currentSessionId;
+    if (!sessionId) {
+      sessionId = Date.now().toString();
+      const newSession: ChatSession = {
+        id: sessionId,
+        title: content.substring(0, 30) || "Nova conversa",
+        date: new Date().toISOString().split("T")[0],
+        group: "Hoje"
+      };
+      setSessions(prev => [newSession, ...prev]);
+      setCurrentSessionId(sessionId);
     }
 
     const userMsg: Message = { id: Date.now().toString(), role: "user", content };
@@ -407,10 +502,7 @@ export default function ChatPage() {
     sendMessage(message);
   }, [sendMessage]);
 
-  const handleNewChat = useCallback(() => {
-    setMessages([]);
-    setInput("");
-  }, []);
+  // handleNewChat já definido acima com lógica de persistência
 
   const handleRetry = useCallback((messageId: string) => {
     const idx = messages.findIndex((m) => m.id === messageId);
@@ -457,7 +549,14 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] overflow-hidden">
-      <Sidebar user={userData} onNewChat={handleNewChat} />
+      <Sidebar 
+        user={userData} 
+        onNewChat={handleNewChat}
+        sessions={sessions}
+        activeSessionId={currentSessionId || undefined}
+        onSelectSession={loadConversation}
+        onDeleteSession={handleDeleteSession}
+      />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 

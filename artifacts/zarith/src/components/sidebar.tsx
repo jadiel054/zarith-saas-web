@@ -32,6 +32,10 @@ interface UserData {
 interface SidebarProps {
   user: UserData;
   onNewChat?: () => void;
+  sessions: ChatSession[];
+  activeSessionId?: string;
+  onSelectSession: (id: string) => void;
+  onDeleteSession?: (id: string) => void;
 }
 
 /** Conteúdo interno da sidebar — compartilhado entre desktop e mobile drawer */
@@ -45,6 +49,9 @@ function SidebarContent({
   onNewChat,
   onClose,
   onAbout,
+  onSelectSession,
+  onDeleteSession,
+  activeSessionId,
 }: {
   user: UserData;
   isCollapsed: boolean;
@@ -55,6 +62,9 @@ function SidebarContent({
   onNewChat?: () => void;
   onClose?: () => void;
   onAbout: () => void;
+  onSelectSession: (id: string) => void;
+  onDeleteSession?: (id: string) => void;
+  activeSessionId?: string;
 }) {
   const filteredSessions = sessions.filter((s) =>
     s.title.toLowerCase().includes(searchQuery.toLowerCase())
@@ -136,7 +146,12 @@ function SidebarContent({
               {groupSessions.map((session) => (
                 <div
                   key={session.id}
-                  className="group flex items-center gap-2 px-3 py-2.5 rounded-xl hover:bg-[var(--bg-card-hover)] cursor-pointer transition-all"
+                  onClick={() => onSelectSession(session.id)}
+                  className={`group flex items-center gap-2 px-3 py-2.5 rounded-xl cursor-pointer transition-all ${
+                    activeSessionId === session.id
+                      ? "bg-[var(--bg-card-hover)] border border-[var(--border-glow)]"
+                      : "hover:bg-[var(--bg-card-hover)]"
+                  }`}
                   title={isCollapsed ? session.title : undefined}
                 >
                   <MessageSquare size={16} className="text-[#00f5ff] shrink-0" />
@@ -146,6 +161,10 @@ function SidebarContent({
                         {session.title}
                       </p>
                       <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteSession?.(session.id);
+                        }}
                         className="opacity-0 group-hover:opacity-100 p-1 hover:text-[#ff0080] text-[var(--text-secondary)] transition-all shrink-0"
                         title="Remover"
                       >
@@ -217,15 +236,18 @@ function SidebarContent({
   );
 }
 
-export function Sidebar({ user, onNewChat }: SidebarProps) {
+export function Sidebar({
+  user,
+  onNewChat,
+  sessions,
+  activeSessionId,
+  onSelectSession,
+  onDeleteSession,
+}: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [aboutOpen, setAboutOpen] = useState(false);
-  const [sessions] = useState<ChatSession[]>([
-    { id: "1", title: "Análise de código Zarith", date: "2024-05-24", group: "Hoje" },
-    { id: "2", title: "Ideias para novo App", date: "2024-05-23", group: "Ontem" },
-  ]);
 
   return (
     <>
@@ -265,9 +287,21 @@ export function Sidebar({ user, onNewChat }: SidebarProps) {
                 sessions={sessions}
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}
-                onNewChat={() => { onNewChat?.(); setMobileOpen(false); }}
+                onNewChat={() => {
+                  onNewChat?.();
+                  setMobileOpen(false);
+                }}
                 onClose={() => setMobileOpen(false)}
-                onAbout={() => { setAboutOpen(true); setMobileOpen(false); }}
+                onAbout={() => {
+                  setAboutOpen(true);
+                  setMobileOpen(false);
+                }}
+                onSelectSession={(id) => {
+                  onSelectSession(id);
+                  setMobileOpen(false);
+                }}
+                onDeleteSession={onDeleteSession}
+                activeSessionId={activeSessionId}
               />
             </motion.div>
           </>
@@ -289,6 +323,9 @@ export function Sidebar({ user, onNewChat }: SidebarProps) {
           setSearchQuery={setSearchQuery}
           onNewChat={onNewChat}
           onAbout={() => setAboutOpen(true)}
+          onSelectSession={onSelectSession}
+          onDeleteSession={onDeleteSession}
+          activeSessionId={activeSessionId}
         />
       </motion.div>
 
