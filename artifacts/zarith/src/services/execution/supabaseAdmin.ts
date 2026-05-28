@@ -7,7 +7,7 @@ export const supabaseAdminService = {
   getSupabaseConfig() {
     return {
       url: localStorage.getItem("zarith_supabase_url") || "",
-      key: localStorage.getItem("zarith_supabase_service_role_key") || "",
+      key: localStorage.getItem("zarith_apikey_Supabase Service Role") || "",
     };
   },
 

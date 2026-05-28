@@ -128,6 +128,30 @@ async function testGithubToken(key: string): Promise<string | null> {
   }
 }
 
+async function testSupabaseServiceRoleKey(key: string): Promise<string | null> {
+  try {
+    const url = localStorage.getItem("zarith_supabase_url");
+    if (!url) return "Configure primeiro a URL do Supabase no projeto.";
+    
+    // Tenta uma operação de admin: listar tabelas do schema public
+    const res = await fetch(`${url}/rest/v1/rpc/execute_sql`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({ query: "SELECT 1;" }),
+    });
+    
+    if (res.ok) return null;
+    const body = await res.json() as { message?: string };
+    return `Erro de Admin: ${body.message || "Permissão negada ou RPC execute_sql não habilitado."}`;
+  } catch {
+    return "Erro de conexão ao validar a Service Role Key.";
+  }
+}
+
 async function testGreptileKey(key: string): Promise<string | null> {
   // Greptile não tem endpoint de health gratuito — aceita qualquer string não vazia
   if (!key || key.trim().length === 0) {
@@ -143,6 +167,7 @@ const SERVICE_TESTERS: Record<string, (key: string) => Promise<string | null>> =
   Tavily: testTavilyKey,
   "GitHub Token": testGithubToken,
   Greptile: testGreptileKey,
+  "Supabase Service Role": testSupabaseServiceRoleKey,
 };
 
 const SERVICES = [
@@ -152,6 +177,7 @@ const SERVICES = [
   { name: "GitHub Token",placeholder: "ghp_...",   description: "Análise de repositórios" },
   { name: "Greptile",    placeholder: "gk-...",    description: "Busca semântica em código" },
   { name: "Tavily",      placeholder: "tvly-...",  description: "Web search em tempo real" },
+  { name: "Supabase Service Role", placeholder: "eyJhbG...", description: "Permissão total de Admin para DDL" },
 ];
 
 // ── Componente principal ──────────────────────────────────────────────────────
