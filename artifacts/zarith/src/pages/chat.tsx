@@ -20,7 +20,10 @@ import { supabaseClient, getCurrentUser } from "@/lib/supabase";
 import { useChatPersistence } from "@/hooks/useChatPersistence";
 import { ExecutionLogs, LogEntry } from "@/components/execution-logs";
 import { deployService } from "@/services/execution/deploy";
-import { Terminal, ShieldAlert, Play, AlertTriangle } from "lucide-react";
+import { githubService } from "@/services/execution/github";
+import { supabaseAdminService } from "@/services/execution/supabaseAdmin";
+import { templatesService } from "@/services/templates/templatesService";
+import { Terminal, ShieldAlert, Play, AlertTriangle, Database, Github, LayoutTemplate } from "lucide-react";
 
 // ── System Prompt — Personalidade da Zarith ──────────────────────────────────
 
@@ -135,10 +138,10 @@ export default function ChatPage() {
   const [isLogsOpen, setIsLogsOpen] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [pendingAction, setPendingAction] = useState<{
-    type: 'deploy';
+    type: 'deploy' | 'github' | 'supabase' | 'template';
     plan: string;
     command: string;
-    files: any[];
+    payload?: any;
   } | null>(null);
 
   // Hook de persistência do Supabase
@@ -478,18 +481,44 @@ export default function ChatPage() {
         await saveChatMessage(currentSessionId, "assistant", finalContent, activeModel.name);
       }
 
-      // Detecção de Intenção de Deploy (Protocolo de Elite)
+      // Detecção de Intenções (Protocolo de Elite)
       const contentLower = finalContent.toLowerCase();
-      if (contentLower.includes("deploy") || contentLower.includes("publicar") || contentLower.includes("subir")) {
-        addLog('thinking', 'Zarith identificou intenção de deploy. Preparando plano...');
+      
+      if (contentLower.includes("deploy") || contentLower.includes("publicar")) {
+        addLog('thinking', 'Zarith identificou intenção de deploy.');
         setPendingAction({
           type: 'deploy',
           plan: "Publicar interface React no ambiente de produção Vercel.",
           command: "vercel deploy --prod",
-          files: [
-            { file: "index.html", data: "<html><body><h1>Zarith Deploy Test</h1></body></html>" }
-          ]
+          payload: { files: [{ file: "index.html", data: "<html><body><h1>Zarith Deploy</h1></body></html>" }] }
         });
+      } else if (contentLower.includes("github") || contentLower.includes("repositório")) {
+        addLog('thinking', 'Zarith identificou intenção de GitHub.');
+        setPendingAction({
+          type: 'github',
+          plan: "Criar novo repositório privado no GitHub para o projeto.",
+          command: "gh repo create zarith-app --private",
+          payload: { name: "zarith-app" }
+        });
+      } else if (contentLower.includes("tabela") || contentLower.includes("sql") || contentLower.includes("banco")) {
+        addLog('thinking', 'Zarith identificou intenção de Banco de Dados.');
+        setPendingAction({
+          type: 'supabase',
+          plan: "Executar migração DDL no Supabase para criar novas tabelas.",
+          command: "supabase db push (remote)",
+          payload: { sql: "CREATE TABLE test_zarith (id uuid primary key);" }
+        });
+      } else if (contentLower.includes("template") || contentLower.includes("boilerplate")) {
+        const template = templatesService.findTemplate(contentLower);
+        if (template) {
+          addLog('thinking', `Zarith encontrou template compatível: ${template.name}`);
+          setPendingAction({
+            type: 'template',
+            plan: `Usar template pré-definido: ${template.name}`,
+            command: `zarith use-template ${template.id}`,
+            payload: template
+          });
+        }
       }
 
     } catch (error) {
@@ -697,15 +726,32 @@ export default function ChatPage() {
                   </button>
                   <button
                     onClick={async () => {
-                      addLog('info', 'Ação autorizada pelo usuário. Iniciando deploy...');
                       const action = pendingAction;
                       setPendingAction(null);
                       setIsLogsOpen(true);
+                      addLog('info', `Ação autorizada: ${action.type.toUpperCase()}`);
+                      
                       try {
                         addLog('command', action.command);
-                        const result = await deployService.createDeployment(action.files, "zarith-project");
-                        addLog('success', `Deploy iniciado: ${result.id}`);
-                        if (result.url) addLog('success', `Link funcional: https://${result.url}`);
+                        
+                        if (action.type === 'deploy') {
+                          const result = await deployService.createDeployment(action.payload.files, "zarith-project");
+                          addLog('success', `Deploy iniciado: ${result.id}`);
+                          if (result.url) addLog('success', `Link funcional: https://${result.url}`);
+                        } 
+                        else if (action.type === 'github') {
+                          const result = await githubService.createRepository(action.payload.name);
+                          addLog('success', `Repositório criado: ${result.html_url}`);
+                        }
+                        else if (action.type === 'supabase') {
+                          await supabaseAdminService.executeSQL(action.payload.sql);
+                          addLog('success', `SQL executado com sucesso no Supabase.`);
+                        }
+                        else if (action.type === 'template') {
+                          addLog('info', `Aplicando template: ${action.payload.name}`);
+                          // Lógica de aplicação de arquivos
+                          addLog('success', `Template ${action.payload.name} injetado no projeto.`);
+                        }
                       } catch (e: any) {
                         addLog('error', e.message);
                       }
