@@ -17,6 +17,7 @@ import { Sidebar } from "@/components/sidebar";
 import { ActionCards } from "@/components/action-cards";
 import { ThinkingStream } from "@/components/thinking-stream";
 import { supabaseClient, getCurrentUser } from "@/lib/supabase";
+import { useChatPersistence } from "@/hooks/useChatPersistence";
 
 // ── System Prompt — Personalidade da Zarith ──────────────────────────────────
 
@@ -126,82 +127,50 @@ export default function ChatPage() {
   const [userData, setUserData] = useState<UserData>({ name: "Jadiel" });
   const [authChecked, setAuthChecked] = useState(false);
 
-  // Estados de persistência
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  // Hook de persistência do Supabase
+  const { 
+    sessions, 
+    loadMessages, 
+    createNewSession, 
+    saveChatMessage, 
+    deleteSession 
+  } = useChatPersistence();
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // ── Persistência: Carregar sessões iniciais ──
-  useEffect(() => {
-    const savedSessions = localStorage.getItem("zarith_sessions");
-    if (savedSessions) {
-      try {
-        setSessions(JSON.parse(savedSessions));
-      } catch (e) {
-        console.error("Erro ao carregar sessões", e);
-      }
-    }
-  }, []);
-
-  // ── Persistência: Salvar sessões quando mudarem ──
-  useEffect(() => {
-    localStorage.setItem("zarith_sessions", JSON.stringify(sessions));
-  }, [sessions]);
-
-  // ── Persistência: Salvar mensagens da sessão atual ──
-  useEffect(() => {
-    if (currentSessionId && messages.length > 0) {
-      localStorage.setItem(`zarith_chat_${currentSessionId}`, JSON.stringify(messages));
-      
-      // Atualizar título da sessão se for a primeira mensagem
-      if (messages.length >= 2) {
-        setSessions(prev => prev.map(s => {
-          if (s.id === currentSessionId && s.title === "Nova conversa") {
-            const firstUserMsg = messages.find(m => m.role === "user");
-            return { ...s, title: firstUserMsg?.content.substring(0, 30) || "Nova conversa" };
-          }
-          return s;
-        }));
-      }
-    }
-  }, [messages, currentSessionId]);
+  // Mapear sessões do banco para o formato da Sidebar
+  const sidebarSessions = sessions.map(s => ({
+    id: s.id,
+    title: s.title,
+    date: s.created_at,
+    group: (new Date(s.created_at).toDateString() === new Date().toDateString() ? "Hoje" : "Mais antigos") as any
+  }));
 
   // ── Funções de Navegação ──
-  const loadConversation = useCallback((id: string) => {
-    const savedMessages = localStorage.getItem(`zarith_chat_${id}`);
-    if (savedMessages) {
-      try {
-        setMessages(JSON.parse(savedMessages));
-        setCurrentSessionId(id);
-      } catch (e) {
-        console.error("Erro ao carregar mensagens da sessão", e);
-      }
-    }
-  }, []);
+  const loadConversation = useCallback(async (id: string) => {
+    const dbMessages = await loadMessages(id);
+    setMessages(dbMessages.map(m => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      model: m.model
+    })));
+    setCurrentSessionId(id);
+  }, [loadMessages]);
 
   const handleNewChat = useCallback(() => {
-    const newId = Date.now().toString();
-    const newSession: ChatSession = {
-      id: newId,
-      title: "Nova conversa",
-      date: new Date().toISOString().split("T")[0],
-      group: "Hoje"
-    };
-    setSessions(prev => [newSession, ...prev]);
-    setCurrentSessionId(newId);
+    setCurrentSessionId(null);
     setMessages([]);
   }, []);
 
-  const handleDeleteSession = useCallback((id: string) => {
-    setSessions(prev => prev.filter(s => s.id !== id));
-    localStorage.removeItem(`zarith_chat_${id}`);
+  const handleDeleteSession = useCallback(async (id: string) => {
+    await deleteSession(id);
     if (currentSessionId === id) {
-      setCurrentSessionId(null);
-      setMessages([]);
+      handleNewChat();
     }
-  }, [currentSessionId]);
+  }, [deleteSession, currentSessionId, handleNewChat]);
 
   // ── Auth check ──
   useEffect(() => {
@@ -253,18 +222,18 @@ export default function ChatPage() {
       }
     }
 
-    // Se não houver sessão ativa, cria uma
+    // Se não houver sessão ativa, cria uma no Supabase
     let sessionId = currentSessionId;
     if (!sessionId) {
-      sessionId = Date.now().toString();
-      const newSession: ChatSession = {
-        id: sessionId,
-        title: content.substring(0, 30) || "Nova conversa",
-        date: new Date().toISOString().split("T")[0],
-        group: "Hoje"
-      };
-      setSessions(prev => [newSession, ...prev]);
-      setCurrentSessionId(sessionId);
+      const session = await createNewSession(content.substring(0, 40));
+      if (session) {
+        sessionId = session.id;
+        setCurrentSessionId(sessionId);
+      }
+    }
+
+    if (sessionId) {
+      await saveChatMessage(sessionId, "user", content);
     }
 
     const userMsg: Message = { id: Date.now().toString(), role: "user", content };
@@ -466,16 +435,24 @@ export default function ChatPage() {
 
       // Streaming token a token
       const tokens = fullResponse.split(" ");
+      let finalContent = "";
       for (let i = 0; i < tokens.length; i++) {
         await new Promise<void>((resolve) => setTimeout(resolve, 20));
+        const part = (i === 0 ? "" : " ") + tokens[i];
+        finalContent += part;
         setMessages((prev) => {
           const updated = [...prev];
           const last = updated[updated.length - 1];
           if (last?.role === "assistant") {
-            last.content += (i === 0 ? "" : " ") + tokens[i];
+            last.content += part;
           }
           return updated;
         });
+      }
+
+      // Salvar resposta da Zarith no Supabase
+      if (currentSessionId && finalContent) {
+        await saveChatMessage(currentSessionId, "assistant", finalContent, activeModel.name);
       }
 
     } catch (error) {
@@ -552,7 +529,7 @@ export default function ChatPage() {
       <Sidebar 
         user={userData} 
         onNewChat={handleNewChat}
-        sessions={sessions}
+        sessions={sidebarSessions}
         activeSessionId={currentSessionId || undefined}
         onSelectSession={loadConversation}
         onDeleteSession={handleDeleteSession}
