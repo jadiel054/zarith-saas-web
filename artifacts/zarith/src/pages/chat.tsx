@@ -94,7 +94,7 @@ function getZarithError(err: unknown, modelName: string): string {
 
 interface Message {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: string;
   model?: string;
   isError?: boolean;
@@ -246,6 +246,10 @@ export default function ChatPage() {
             return data.choices[0]?.message?.content ?? "Sem resposta.";
 
           } else if (modelId === "gemini" && geminiKey) {
+            // Filtra o histórico para remover mensagens de sistema (já incluídas no systemInstruction)
+            // e garante que o histórico comece com uma mensagem de usuário
+            const filteredHistory = history.filter(m => m.role !== 'system');
+            
             const res = await fetch(
               `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`,
               {
@@ -258,7 +262,7 @@ export default function ChatPage() {
                   systemInstruction: {
                     parts: [{ text: ZARITH_SYSTEM_PROMPT }]
                   },
-                  contents: history.map(m => ({
+                  contents: filteredHistory.map(m => ({
                     role: m.role === 'assistant' ? 'model' : 'user',
                     parts: [{ text: m.content }]
                   })).concat([{
@@ -310,7 +314,7 @@ export default function ChatPage() {
                 "X-Title": "Zarith AI",
               },
               body: JSON.stringify({
-                model: "zhipu/glm-4-turbo",
+                model: "z-ai/glm-4-32b",
                 messages: [
                   { role: "system", content: ZARITH_SYSTEM_PROMPT },
                   ...history,
