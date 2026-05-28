@@ -18,6 +18,9 @@ import { ActionCards } from "@/components/action-cards";
 import { ThinkingStream } from "@/components/thinking-stream";
 import { supabaseClient, getCurrentUser } from "@/lib/supabase";
 import { useChatPersistence } from "@/hooks/useChatPersistence";
+import { ExecutionLogs, LogEntry } from "@/components/execution-logs";
+import { deployService } from "@/services/execution/deploy";
+import { Terminal, ShieldAlert, Play, AlertTriangle } from "lucide-react";
 
 // ── System Prompt — Personalidade da Zarith ──────────────────────────────────
 
@@ -34,6 +37,7 @@ COMPORTAMENTO:
 - Se o código for ruim, zomba levemente ANTES de sugerir a correção: "Cara, que código é esse? Parece que foi gerado às 3h da manhã. Mas tudo bem, vou arrumar."
 - Respostas técnicas são precisas e sem enrolação.
 - Nunca diz "Como posso te ajudar?" — vai direto ao ponto.
+- Você é uma ORQUESTRADORA: Se o usuário pedir para criar um site, app ou deployar algo, você deve gerar um plano técnico e solicitar autorização explicitamente.
 
 EXEMPLOS DE RESPOSTA:
 - Ao receber tarefa vaga: "Beleza, Jadiel. Mas vai ser o quê? Landing page, sistema completo ou portfólio? Manda o papo completo pra eu não perder tempo!"
@@ -127,6 +131,16 @@ export default function ChatPage() {
   const [userData, setUserData] = useState<UserData>({ name: "Jadiel" });
   const [authChecked, setAuthChecked] = useState(false);
 
+  // Estados de Execução e Logs
+  const [isLogsOpen, setIsLogsOpen] = useState(false);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [pendingAction, setPendingAction] = useState<{
+    type: 'deploy';
+    plan: string;
+    command: string;
+    files: any[];
+  } | null>(null);
+
   // Hook de persistência do Supabase
   const { 
     sessions, 
@@ -139,6 +153,15 @@ export default function ChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const addLog = useCallback((type: LogEntry['type'], message: string) => {
+    setLogs(prev => [...prev, {
+      id: Math.random().toString(36).substring(7),
+      timestamp: Date.now(),
+      type,
+      message
+    }]);
+  }, []);
 
   // Mapear sessões do banco para o formato da Sidebar
   const sidebarSessions = sessions.map(s => ({
@@ -455,6 +478,20 @@ export default function ChatPage() {
         await saveChatMessage(currentSessionId, "assistant", finalContent, activeModel.name);
       }
 
+      // Detecção de Intenção de Deploy (Protocolo de Elite)
+      const contentLower = finalContent.toLowerCase();
+      if (contentLower.includes("deploy") || contentLower.includes("publicar") || contentLower.includes("subir")) {
+        addLog('thinking', 'Zarith identificou intenção de deploy. Preparando plano...');
+        setPendingAction({
+          type: 'deploy',
+          plan: "Publicar interface React no ambiente de produção Vercel.",
+          command: "vercel deploy --prod",
+          files: [
+            { file: "index.html", data: "<html><body><h1>Zarith Deploy Test</h1></body></html>" }
+          ]
+        });
+      }
+
     } catch (error) {
       const zarithError = getZarithError(error, activeModel.name);
       setMessages((prev) => {
@@ -579,6 +616,19 @@ export default function ChatPage() {
             </AnimatePresence>
           </div>
 
+          {/* Logs toggle */}
+          <button
+            onClick={() => setIsLogsOpen(!isLogsOpen)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all text-xs font-bold ${
+              isLogsOpen
+                ? "bg-[#bf00ff]/10 border-[#bf00ff] text-[#bf00ff]"
+                : "border-[var(--border-glow)] text-[var(--text-secondary)]"
+            }`}
+          >
+            <Terminal size={13} />
+            <span className="hidden sm:inline">Logs</span>
+          </button>
+
           {/* Web search toggle */}
           <button
             onClick={() => setWebSearchEnabled(!webSearchEnabled)}
@@ -611,6 +661,61 @@ export default function ChatPage() {
                   </a>{" "}
                   e bota a chave lá.
                 </p>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Protocolo de Proteção - Banner de Aprovação */}
+        <AnimatePresence>
+          {pendingAction && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="bg-[#bf00ff]/10 border-b border-[#bf00ff]/30 overflow-hidden"
+            >
+              <div className="max-w-4xl mx-auto p-4 flex flex-col md:flex-row items-start md:items-center gap-4">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 text-[#bf00ff] font-black text-xs uppercase mb-1">
+                    <ShieldAlert size={14} />
+                    <span>Autorização de Execução Necessária</span>
+                  </div>
+                  <p className="text-xs text-white/80 font-mono mb-2">
+                    <span className="text-[#00f5ff] font-bold">Plano:</span> {pendingAction.plan}
+                  </p>
+                  <div className="bg-black/40 p-2 rounded border border-white/10 font-mono text-[10px] text-[#00f5ff]">
+                    $ {pendingAction.command}
+                  </div>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    onClick={() => setPendingAction(null)}
+                    className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-bold transition-all"
+                  >
+                    Abortar
+                  </button>
+                  <button
+                    onClick={async () => {
+                      addLog('info', 'Ação autorizada pelo usuário. Iniciando deploy...');
+                      const action = pendingAction;
+                      setPendingAction(null);
+                      setIsLogsOpen(true);
+                      try {
+                        addLog('command', action.command);
+                        const result = await deployService.createDeployment(action.files, "zarith-project");
+                        addLog('success', `Deploy iniciado: ${result.id}`);
+                        if (result.url) addLog('success', `Link funcional: https://${result.url}`);
+                      } catch (e: any) {
+                        addLog('error', e.message);
+                      }
+                    }}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] text-black text-xs font-black flex items-center gap-2 hover:brightness-110 transition-all"
+                  >
+                    <Play size={14} />
+                    EXECUTAR
+                  </button>
+                </div>
               </div>
             </motion.div>
           )}
@@ -718,6 +823,11 @@ export default function ChatPage() {
           </div>
         </div>
       </div>
+      <ExecutionLogs 
+        isOpen={isLogsOpen} 
+        onClose={() => setIsLogsOpen(false)} 
+        logs={logs} 
+      />
     </div>
   );
 }
