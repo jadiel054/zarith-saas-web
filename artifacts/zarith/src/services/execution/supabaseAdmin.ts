@@ -6,7 +6,7 @@
 export const supabaseAdminService = {
   getSupabaseConfig() {
     return {
-      url: localStorage.getItem("zarith_supabase_url") || "",
+      url: localStorage.getItem("zarith_apikey_Supabase URL") || localStorage.getItem("zarith_supabase_url") || "",
       key: localStorage.getItem("zarith_apikey_Supabase Service Role") || "",
     };
   },

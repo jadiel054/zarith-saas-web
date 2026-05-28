@@ -130,10 +130,11 @@ async function testGithubToken(key: string): Promise<string | null> {
 
 async function testSupabaseServiceRoleKey(key: string): Promise<string | null> {
   try {
-    const url = localStorage.getItem("zarith_supabase_url");
-    if (!url) return "Configure primeiro a URL do Supabase no projeto.";
+    // Busca a URL tanto do localStorage quanto do que pode estar sendo digitado (se implementado)
+    // Para simplificar, usamos o valor salvo no localStorage ou o valor fixo do projeto
+    const url = localStorage.getItem("zarith_apikey_Supabase URL") || localStorage.getItem("zarith_supabase_url");
+    if (!url) return "Configure primeiro a URL do Supabase no campo acima.";
     
-    // Tenta uma operação de admin: listar tabelas do schema public
     const res = await fetch(`${url}/rest/v1/rpc/execute_sql`, {
       method: "POST",
       headers: {
@@ -149,6 +150,17 @@ async function testSupabaseServiceRoleKey(key: string): Promise<string | null> {
     return `Erro de Admin: ${body.message || "Permissão negada ou RPC execute_sql não habilitado."}`;
   } catch {
     return "Erro de conexão ao validar a Service Role Key.";
+  }
+}
+
+async function testSupabaseUrl(url: string): Promise<string | null> {
+  try {
+    if (!url.startsWith("https://")) return "A URL deve começar com https://";
+    const res = await fetch(`${url}/rest/v1/`, { method: "GET" });
+    if (res.status === 200 || res.status === 401) return null; // 401 é OK (API está lá, só falta a key)
+    return `URL parece inválida (Status ${res.status})`;
+  } catch {
+    return "Não foi possível conectar a esta URL.";
   }
 }
 
@@ -168,6 +180,7 @@ const SERVICE_TESTERS: Record<string, (key: string) => Promise<string | null>> =
   "GitHub Token": testGithubToken,
   Greptile: testGreptileKey,
   "Supabase Service Role": testSupabaseServiceRoleKey,
+  "Supabase URL": testSupabaseUrl,
 };
 
 const SERVICES = [
@@ -177,6 +190,7 @@ const SERVICES = [
   { name: "GitHub Token",placeholder: "ghp_...",   description: "Análise de repositórios" },
   { name: "Greptile",    placeholder: "gk-...",    description: "Busca semântica em código" },
   { name: "Tavily",      placeholder: "tvly-...",  description: "Web search em tempo real" },
+  { name: "Supabase URL", placeholder: "https://xxx.supabase.co", description: "URL do seu projeto Supabase" },
   { name: "Supabase Service Role", placeholder: "eyJhbG...", description: "Permissão total de Admin para DDL" },
 ];
 
