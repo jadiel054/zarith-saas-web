@@ -14,7 +14,7 @@ interface ExecutionLogsProps {
   logs: LogEntry[];
 }
 
-export function ExecutionLogs({ isOpen, onClose, logs }: ExecutionLogsProps) {
+export function ExecutionLogs({ isOpen, onClose, logs = [] }: ExecutionLogsProps) {
   return (
     <AnimatePresence>
       {isOpen && (
@@ -38,7 +38,7 @@ export function ExecutionLogs({ isOpen, onClose, logs }: ExecutionLogsProps) {
 
           {/* Logs List */}
           <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] leading-relaxed space-y-3">
-            {logs.length === 0 && (
+            {(logs || []).length === 0 && (
               <div className="h-full flex flex-col items-center justify-center text-[var(--text-secondary)] opacity-50">
                 <Terminal size={40} className="mb-2" />
                 <p>Nenhuma atividade registrada.</p>

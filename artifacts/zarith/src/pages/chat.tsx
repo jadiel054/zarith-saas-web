@@ -1036,7 +1036,7 @@ export default function ChatPage() {
       <AgentPlannerPanel steps={plannerSteps} isOpen={isPlannerOpen} />
 
       {/* Execution Logs */}
-      <ExecutionLogs entries={logs} isOpen={isLogsOpen} onClose={() => setIsLogsOpen(false)} />
+      <ExecutionLogs logs={logs} isOpen={isLogsOpen} onClose={() => setIsLogsOpen(false)} />
     </div>
   );
 }
