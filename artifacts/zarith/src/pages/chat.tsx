@@ -19,6 +19,8 @@ import { ThinkingStream } from "@/components/thinking-stream";
 import { supabaseClient, getCurrentUser } from "@/lib/supabase";
 import { useChatPersistence } from "@/hooks/useChatPersistence";
 import { ExecutionLogs, LogEntry } from "@/components/execution-logs";
+import { AgentPlannerPanel, PlanStep } from "@/components/agent-planner-panel";
+import { ToolCallStream, ToolCall } from "@/components/tool-call-stream";
 import { deployService } from "@/services/execution/deploy";
 import { githubService } from "@/services/execution/github";
 import { supabaseAdminService } from "@/services/execution/supabaseAdmin";
@@ -51,7 +53,15 @@ EXEMPLOS DE RESPOSTA:
 LINGUAGEM:
 - Respostas em português brasileiro.
 - Markdown para código com syntax highlighting.
-- Direta ao ponto — sem introduções longas nem despedidas formais.`;
+- Direta ao ponto — sem introduções longas nem despedidas formais.
+
+FERRAMENTAS DISPONÍVEIS (use quando o usuário pedir):
+- Liste repositórios do GitHub de jadiel054 via /api/github/repos
+- Leia arquivos de repositórios via /api/github/read-file
+- Crie e commite arquivos via /api/github/create-file
+- Quando pedirem para analisar repositório, criar arquivo ou fazer commit — execute via fetch para o api-server
+- Nunca diga que não tem acesso ao GitHub — você tem via api-server e todas as que ela precisar para ter acesso total para realizar de forma autônoma sem precisar que eu fique aprovando a todo momento.
+Você deve ter noção de analisar e entender a lógica, executar usando as funções sem parar até entregar o resultado final.`;
 
 // ── Modelos ───────────────────────────────────────────────────────────────────
 
@@ -143,6 +153,11 @@ export default function ChatPage() {
     command: string;
     payload?: any;
   } | null>(null);
+
+  // Estados para Planejador e Tool Stream
+  const [plannerSteps, setPlannerSteps] = useState<PlanStep[]>([]);
+  const [toolCalls, setToolCalls] = useState<ToolCall[]>([]);
+  const [isPlannerOpen, setIsPlannerOpen] = useState(false);
 
   // Hook de persistência do Supabase
   const { 
@@ -336,9 +351,9 @@ export default function ChatPage() {
             return data.choices[0]?.message?.content ?? "Sem resposta.";
 
           } else if (modelId === "gemini" && geminiKey) {
-            // Filtra o histórico para remover mensagens de sistema (já incluídas no systemInstruction)
-            // e garante que o histórico comece com uma mensagem de usuário
-            const filteredHistory = history.filter(m => m.role !== 'system');
+            // FASE 1 — Corrigir Gemini: Filtra mensagens system e usa systemInstruction separado
+            const systemMessages = [{ role: "system", content: ZARITH_SYSTEM_PROMPT }];
+            const chatMessages = [...history.filter(m => m.role !== "system"), { role: "user", content }];
             
             const res = await fetch(
               `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`,
@@ -350,16 +365,13 @@ export default function ChatPage() {
                 },
                 body: JSON.stringify({
                   systemInstruction: {
-                    parts: [{ text: ZARITH_SYSTEM_PROMPT }]
+                    parts: [{ text: systemMessages.map(m => m.content).join("\n") }]
                   },
-                  contents: filteredHistory.map(m => ({
-                    role: m.role === 'assistant' ? 'model' : 'user',
-                    parts: [{ text: m.content }]
-                  })).concat([{
-                    role: 'user',
-                    parts: [{ text: content }]
-                  }]),
-                  generationConfig: { maxOutputTokens: 2048 }
+                  contents: chatMessages.map(msg => ({
+                    role: msg.role === "assistant" ? "model" : "user",
+                    parts: [{ text: msg.content }]
+                  })),
+                  generationConfig: { temperature: 0.7, maxOutputTokens: 1024 }
                 }),
               }
             );
@@ -481,8 +493,44 @@ export default function ChatPage() {
         await saveChatMessage(currentSessionId, "assistant", finalContent, activeModel.name);
       }
 
-      // Detecção de Intenções (Protocolo de Elite)
+      // Detecção de Intenções (Protocolo de Elite) e Autonomia
       const contentLower = finalContent.toLowerCase();
+
+      // Lógica de Autonomia (Fase 4) - Detecção de Tool Calls no texto
+      const githubToolMatch = finalContent.match(/\[TOOL_CALL:GITHUB:(REPOS|READ|CREATE|COMMIT):(.*?)\]/i);
+      if (githubToolMatch) {
+        const [_, action, paramsRaw] = githubToolMatch;
+        const params = JSON.parse(paramsRaw || "{}");
+        
+        const callId = Math.random().toString(36).substring(7);
+        const newToolCall: ToolCall = { id: callId, name: `github:${action.toLowerCase()}`, args: params, status: "calling" };
+        setToolCalls(prev => [...prev, newToolCall]);
+        setIsPlannerOpen(true);
+
+        try {
+          const endpoint = action.toLowerCase() === "repos" ? "/api/github/repos" : 
+                          action.toLowerCase() === "read" ? "/api/github/read-file" : 
+                          "/api/github/create-file";
+          
+          const toolRes = await fetch(`${window.location.origin}${endpoint}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(params)
+          });
+          const toolData = await toolRes.json();
+          
+          setToolCalls(prev => prev.map(c => c.id === callId ? { ...c, status: "success", result: toolData } : c));
+          addLog('success', `Ferramenta GitHub:${action} executada com sucesso.`);
+          
+          // Se for uma ferramenta de leitura, a Zarith pode continuar o raciocínio
+          if (action.toLowerCase() === "read" || action.toLowerCase() === "repos") {
+             sendMessage(`Analisei os dados do GitHub: ${JSON.stringify(toolData).substring(0, 200)}... Continue o trabalho.`);
+          }
+        } catch (err) {
+          setToolCalls(prev => prev.map(c => c.id === callId ? { ...c, status: "error", result: String(err) } : c));
+          addLog('error', `Falha ao executar ferramenta GitHub:${action}`);
+        }
+      }
       
       if (contentLower.includes("deploy") || contentLower.includes("publicar")) {
         addLog('thinking', 'Zarith identificou intenção de deploy.');
@@ -874,6 +922,23 @@ export default function ChatPage() {
         onClose={() => setIsLogsOpen(false)} 
         logs={logs} 
       />
+
+      {/* Planejador Visual (Fase 4) */}
+      <AgentPlannerPanel 
+        steps={plannerSteps} 
+        isOpen={isPlannerOpen} 
+      />
+
+      {/* Tool Call Stream (Fase 4) */}
+      <AnimatePresence>
+        {toolCalls.length > 0 && (
+          <div className="fixed bottom-24 left-1/2 -translate-x-1/2 w-full max-w-xl px-4 pointer-events-none">
+            <div className="pointer-events-auto">
+              <ToolCallStream calls={toolCalls} />
+            </div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
