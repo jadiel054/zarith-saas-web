@@ -1,0 +1,281 @@
+{
+  "projectName": "zarith-saas-web",
+  "description": "Zarith - Elite AI Agent System for SaaS Development",
+  "version": "1.0.0",
+  "lastUpdated": "2026-05-29T00:00:00Z",
+  "structure": {
+    "artifacts": {
+      "api-server": {
+        "description": "Backend API server para Zarith",
+        "type": "nodejs-express",
+        "files": [
+          {
+            "path": "src/index.ts",
+            "description": "Entry point do servidor",
+            "type": "entry-point",
+            "size": "small"
+          },
+          {
+            "path": "src/app.ts",
+            "description": "Configuração Express com middlewares",
+            "type": "config",
+            "size": "small"
+          },
+          {
+            "path": "src/lib/logger.ts",
+            "description": "Logger estruturado com Pino",
+            "type": "utility",
+            "size": "small"
+          },
+          {
+            "path": "src/lib/auditLog.ts",
+            "description": "Sistema de logging de auditoria para rastreamento de operações",
+            "type": "utility",
+            "size": "medium",
+            "features": ["file-logging", "filtering", "cleanup"]
+          },
+          {
+            "path": "src/routes/index.ts",
+            "description": "Agregador de rotas",
+            "type": "router",
+            "size": "small"
+          },
+          {
+            "path": "src/routes/health.ts",
+            "description": "Health check endpoint",
+            "type": "route",
+            "size": "small"
+          },
+          {
+            "path": "src/routes/github.ts",
+            "description": "Rotas para integração com GitHub API",
+            "type": "route",
+            "size": "medium",
+            "endpoints": ["/repos", "/read-file", "/create-file", "/commit"]
+          },
+          {
+            "path": "src/routes/deploy.ts",
+            "description": "Rotas para gerenciamento de deploys na Vercel",
+            "type": "route",
+            "size": "medium",
+            "endpoints": ["/create", "/status/:deploymentId", "/:deploymentId", "/list/:projectId"],
+            "features": ["error-handling", "audit-logging"]
+          },
+          {
+            "path": "src/routes/supabase.ts",
+            "description": "Rotas para operações SQL e banco de dados",
+            "type": "route",
+            "size": "large",
+            "endpoints": ["/execute", "/create-table", "/add-column", "/drop-table", "/migration", "/tables"],
+            "features": ["sql-execution", "migration-support", "safety-validation"]
+          },
+          {
+            "path": "src/services/deployService.ts",
+            "description": "Serviço de deploy na Vercel com tratamento de erros",
+            "type": "service",
+            "size": "medium",
+            "methods": ["createDeployment", "checkDeploymentStatus", "cancelDeployment", "listDeployments"]
+          },
+          {
+            "path": "src/services/supabaseAdminService.ts",
+            "description": "Serviço de administração do Supabase com Service Role",
+            "type": "service",
+            "size": "large",
+            "methods": ["executeSQL", "createTable", "addColumn", "dropTable", "executeMigration", "listTables"]
+          },
+          {
+            "path": "src/middlewares/errorRecovery.ts",
+            "description": "Middleware de recuperação automática de erros com Self-Healing",
+            "type": "middleware",
+            "size": "medium",
+            "features": ["retry-logic", "backoff-calculation", "fallback-execution"]
+          }
+        ]
+      },
+      "zarith": {
+        "description": "Frontend React para Zarith",
+        "type": "react-vite",
+        "files": [
+          {
+            "path": "src/pages/chat.tsx",
+            "description": "Página principal de chat com processamento de tool_calls",
+            "type": "page",
+            "size": "large",
+            "features": ["message-streaming", "tool-call-processing", "error-boundary", "self-healing"]
+          },
+          {
+            "path": "src/components/tool-call-stream.tsx",
+            "description": "Componente para exibir execução de ferramentas",
+            "type": "component",
+            "size": "small"
+          },
+          {
+            "path": "src/components/agent-planner-panel.tsx",
+            "description": "Painel de planejamento com checklist de etapas",
+            "type": "component",
+            "size": "small"
+          },
+          {
+            "path": "src/components/error-boundary.tsx",
+            "description": "Error Boundary para capturar e tratar erros de execução",
+            "type": "component",
+            "size": "small"
+          },
+          {
+            "path": "src/services/execution/deploy.ts",
+            "description": "Serviço de deploy no frontend",
+            "type": "service",
+            "size": "small"
+          },
+          {
+            "path": "src/services/execution/github.ts",
+            "description": "Serviço de integração com GitHub no frontend",
+            "type": "service",
+            "size": "small"
+          },
+          {
+            "path": "src/services/execution/supabaseAdmin.ts",
+            "description": "Serviço de administração do Supabase no frontend",
+            "type": "service",
+            "size": "small"
+          },
+          {
+            "path": "src/services/selfHealing.ts",
+            "description": "Serviço de Self-Healing com diagnóstico de erros e recuperação",
+            "type": "service",
+            "size": "medium",
+            "features": ["error-diagnosis", "retry-logic", "fallback-strategies"]
+          }
+        ]
+      }
+    }
+  },
+  "features": {
+    "tool-calls": {
+      "description": "Processamento estruturado de chamadas de ferramentas",
+      "status": "implemented",
+      "format": "[TOOL_CALL] {name, args} [/TOOL_CALL]"
+    },
+    "error-boundary": {
+      "description": "Captura e tratamento de erros com fallback",
+      "status": "implemented",
+      "location": "components/error-boundary.tsx"
+    },
+    "audit-logging": {
+      "description": "Registro de todas as operações críticas",
+      "status": "implemented",
+      "location": "lib/auditLog.ts",
+      "logFile": "logs/audit.log"
+    },
+    "self-healing": {
+      "description": "Recuperação automática de falhas com retry e fallback",
+      "status": "implemented",
+      "locations": ["services/selfHealing.ts", "middlewares/errorRecovery.ts"]
+    },
+    "security-validation": {
+      "description": "Validação de segurança com confirmação para operações perigosas",
+      "status": "implemented",
+      "dangerousOperations": ["DROP TABLE", "DELETE FROM", "TRUNCATE"]
+    }
+  },
+  "apiEndpoints": {
+    "github": {
+      "base": "/api/github",
+      "endpoints": [
+        {"method": "POST", "path": "/repos", "description": "Listar repositórios"},
+        {"method": "POST", "path": "/read-file", "description": "Ler arquivo do repositório"},
+        {"method": "POST", "path": "/create-file", "description": "Criar/atualizar arquivo"},
+        {"method": "POST", "path": "/commit", "description": "Fazer commit"}
+      ]
+    },
+    "deploy": {
+      "base": "/api/deploy",
+      "endpoints": [
+        {"method": "POST", "path": "/create", "description": "Criar novo deployment"},
+        {"method": "GET", "path": "/status/:deploymentId", "description": "Verificar status"},
+        {"method": "DELETE", "path": "/:deploymentId", "description": "Cancelar deployment"},
+        {"method": "GET", "path": "/list/:projectId", "description": "Listar deployments"}
+      ]
+    },
+    "supabase": {
+      "base": "/api/supabase",
+      "endpoints": [
+        {"method": "POST", "path": "/execute", "description": "Executar SQL"},
+        {"method": "POST", "path": "/create-table", "description": "Criar tabela"},
+        {"method": "POST", "path": "/add-column", "description": "Adicionar coluna"},
+        {"method": "POST", "path": "/drop-table", "description": "Deletar tabela (requer confirmação)"},
+        {"method": "POST", "path": "/migration", "description": "Executar migração"},
+        {"method": "GET", "path": "/tables", "description": "Listar tabelas"}
+      ]
+    }
+  },
+  "environmentVariables": {
+    "required": [
+      "PORT",
+      "GITHUB_TOKEN",
+      "VERCEL_TOKEN",
+      "SUPABASE_URL",
+      "SUPABASE_SERVICE_ROLE_KEY"
+    ],
+    "optional": [
+      "LOG_LEVEL",
+      "NODE_ENV"
+    ]
+  },
+  "securityLevels": {
+    "read": {
+      "level": "automatic",
+      "description": "Operações de leitura são executadas automaticamente"
+    },
+    "write": {
+      "level": "automatic",
+      "description": "Operações de escrita/commit são executadas automaticamente"
+    },
+    "deploy": {
+      "level": "confirmation_required",
+      "description": "Deploy requer confirmação do usuário"
+    },
+    "delete": {
+      "level": "confirmation_required",
+      "description": "Operações de delete/drop requerem confirmação explícita"
+    },
+    "dangerous": {
+      "level": "confirmation_required",
+      "description": "Operações potencialmente destrutivas requerem confirmação"
+    }
+  },
+  "errorRecoveryStrategies": [
+    {
+      "name": "retry_with_backoff",
+      "description": "Retry com backoff exponencial para erros temporários",
+      "applicableTo": ["network_errors", "rate_limits", "timeouts", "server_errors"]
+    },
+    {
+      "name": "clear_cache_and_retry",
+      "description": "Limpar cache e tentar novamente",
+      "applicableTo": ["stale_cache", "cache_errors"]
+    },
+    {
+      "name": "switch_endpoint",
+      "description": "Tentar endpoint alternativo",
+      "applicableTo": ["endpoint_errors", "url_errors"]
+    }
+  ],
+  "auditLogFormat": {
+    "timestamp": "ISO 8601",
+    "action": "string (action:subaction:status)",
+    "details": "object",
+    "userId": "string (optional)",
+    "ipAddress": "string (optional)"
+  },
+  "lastModified": {
+    "date": "2026-05-29",
+    "changes": [
+      "Implementado processamento real de tool_calls",
+      "Adicionado Error Boundary para captura de erros",
+      "Criado sistema de logging de auditoria",
+      "Implementado Modo Self-Healing com recuperação automática",
+      "Adicionado project_map.json para memória de código"
+    ]
+  }
+}

@@ -27,7 +27,7 @@ import { supabaseAdminService } from "@/services/execution/supabaseAdmin";
 import { templatesService } from "@/services/templates/templatesService";
 import { Terminal, ShieldAlert, Play, AlertTriangle, Database, Github, LayoutTemplate } from "lucide-react";
 
-// ── System Prompt — Personalidade da Zarith ──────────────────────────────────
+// ── System Prompt — Personalidade da Zarith com Self-Healing ──────────────────
 
 const ZARITH_SYSTEM_PROMPT = `Você é Zarith, um sistema agente de elite criado por Jadiel (25 anos, brasileiro).
 
@@ -61,7 +61,15 @@ FERRAMENTAS DISPONÍVEIS (use quando o usuário pedir):
 - Crie e commite arquivos via /api/github/create-file
 - Quando pedirem para analisar repositório, criar arquivo ou fazer commit — execute via fetch para o api-server
 - Nunca diga que não tem acesso ao GitHub — você tem via api-server e todas as que ela precisar para ter acesso total para realizar de forma autônoma sem precisar que eu fique aprovando a todo momento.
-Você deve ter noção de analisar e entender a lógica, executar usando as funções sem parar até entregar o resultado final.`;
+Você deve ter noção de analisar e entender a lógica, executar usando as funções sem parar até entregar o resultado final.
+
+MODO SELF-HEALING (Auto-correção):
+- Quando uma execução de ferramenta falha (ex: erro 400 ou 500):
+  1. Analise o log de erro retornado pela ferramenta
+  2. Diagnostique a causa provável (falta de autenticação, payload inválido, recurso não encontrado, etc.)
+  3. Tente uma abordagem alternativa OU peça clarificação técnica ao usuário
+- Nunca simplesmente desista — sempre tente recuperar da falha.
+- Registre o erro no log de auditoria para que Jadiel possa auditar depois.`;
 
 // ── Modelos ───────────────────────────────────────────────────────────────────
 
@@ -80,10 +88,32 @@ const MODELS: ModelDef[] = [
   { id: "glm",      name: "GLM",      icon: <Bot size={15} />,   desc: "5.1 (longo prazo)" },
 ];
 
-// ── Fallbacks com voz da Zarith ───────────────────────────────────────────────
+// ── Tipos ─────────────────────────────────────────────────────────────────────
 
+interface Message {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  model?: string;
+  isError?: boolean;
+  tool_calls?: ToolCall[];
+}
 
-// Helper para obter chaves de API com fallback duplo (localStorage > variáveis de ambiente)
+interface UserData {
+  name: string;
+  email?: string;
+  avatarUrl?: string;
+}
+
+interface ChatSession {
+  id: string;
+  title: string;
+  date: string;
+  group: "Hoje" | "Ontem" | "Semana passada" | "Mais antigos";
+}
+
+// ── Helper Functions ──────────────────────────────────────────────────────────
+
 function getApiKey(localStorageKey: string, envKey: string | undefined): string {
   const localValue = localStorage.getItem(localStorageKey);
   if (localValue && localValue.trim().length > 0) {
@@ -108,30 +138,88 @@ function getZarithError(err: unknown, modelName: string): string {
   return `A API do ${modelName} tá fora, Jadiel. Tentando fallback... ou testa outro modelo.`;
 }
 
-// ── Tipos ─────────────────────────────────────────────────────────────────────
+// ── Tool Call Executor (com Error Boundary e Self-Healing) ──────────────────
 
-interface Message {
-  id: string;
-  role: "user" | "assistant" | "system";
-  content: string;
-  model?: string;
-  isError?: boolean;
+interface ToolCallRequest {
+  name: string;
+  args: any;
 }
 
-interface UserData {
-  name: string;
-  email?: string;
-  avatarUrl?: string;
+async function executeToolCall(
+  toolCall: ToolCallRequest,
+  addLog: (type: LogEntry['type'], message: string) => void,
+  onToolCallUpdate: (toolCall: ToolCall) => void
+): Promise<ToolCall> {
+  const callId = Math.random().toString(36).substring(7);
+  const toolCallState: ToolCall = {
+    id: callId,
+    name: toolCall.name,
+    args: toolCall.args,
+    status: "calling"
+  };
+
+  try {
+    addLog('info', `Executando ferramenta: ${toolCall.name}`);
+    onToolCallUpdate(toolCallState);
+
+    // Roteamento de ferramentas
+    let response: any;
+    const [toolType, action] = toolCall.name.split(':');
+
+    if (toolType === 'github') {
+      const endpoint = action.toLowerCase() === "repos" ? "/api/github/repos" : 
+                      action.toLowerCase() === "read" ? "/api/github/read-file" : 
+                      "/api/github/create-file";
+      
+      response = await fetch(`${window.location.origin}${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toolCall.args)
+      });
+    } else if (toolType === 'deploy') {
+      response = await fetch(`${window.location.origin}/api/deploy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toolCall.args)
+      });
+    } else if (toolType === 'supabase') {
+      response = await fetch(`${window.location.origin}/api/supabase`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toolCall.args)
+      });
+    } else {
+      throw new Error(`Ferramenta desconhecida: ${toolCall.name}`);
+    }
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+      throw new Error(JSON.stringify(errorData));
+    }
+
+    const result = await response.json();
+    
+    toolCallState.status = "success";
+    toolCallState.result = result;
+    onToolCallUpdate(toolCallState);
+    addLog('success', `Ferramenta ${toolCall.name} executada com sucesso`);
+
+    return toolCallState;
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    toolCallState.status = "error";
+    toolCallState.result = { error: errorMsg };
+    onToolCallUpdate(toolCallState);
+    addLog('error', `Falha ao executar ${toolCall.name}: ${errorMsg}`);
+
+    // Log de auditoria para análise posterior
+    console.error(`[AUDIT] Tool execution failed: ${toolCall.name}`, { args: toolCall.args, error: errorMsg });
+
+    return toolCallState;
+  }
 }
 
 // ── Componente principal ──────────────────────────────────────────────────────
-
-interface ChatSession {
-  id: string;
-  title: string;
-  date: string;
-  group: "Hoje" | "Ontem" | "Semana passada" | "Mais antigos";
-}
 
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -181,6 +269,18 @@ export default function ChatPage() {
     }]);
   }, []);
 
+  const updateToolCall = useCallback((toolCall: ToolCall) => {
+    setToolCalls(prev => {
+      const existing = prev.findIndex(tc => tc.id === toolCall.id);
+      if (existing >= 0) {
+        const updated = [...prev];
+        updated[existing] = toolCall;
+        return updated;
+      }
+      return [...prev, toolCall];
+    });
+  }, []);
+
   // Mapear sessões do banco para o formato da Sidebar
   const sidebarSessions = sessions.map(s => ({
     id: s.id,
@@ -204,6 +304,8 @@ export default function ChatPage() {
   const handleNewChat = useCallback(() => {
     setCurrentSessionId(null);
     setMessages([]);
+    setToolCalls([]);
+    setPlannerSteps([]);
   }, []);
 
   const handleDeleteSession = useCallback(async (id: string) => {
@@ -287,16 +389,15 @@ export default function ChatPage() {
       role: "assistant",
       content: "",
       model: activeModel.name,
+      tool_calls: []
     };
     setMessages((prev) => [...prev, assistantMsg]);
 
     try {
-      // Fallback duplo: localStorage primeiro, depois variáveis de ambiente
       const groqKey   = getApiKey("zarith_apikey_Groq", import.meta.env.VITE_GROQ_API_KEY);
       const geminiKey = getApiKey("zarith_apikey_Gemini", import.meta.env.VITE_GEMINI_API_KEY);
       const orKey     = getApiKey("zarith_apikey_OpenRouter", import.meta.env.VITE_OPENROUTER_API_KEY);
 
-      // Histórico de conversa (últimas 12 mensagens) + system prompt
       const history = messages.slice(-12).map((m) => ({
         role: m.role,
         content: m.content,
@@ -305,7 +406,6 @@ export default function ChatPage() {
       let fullResponse = "";
       let lastError = "";
 
-      // Função auxiliar para tentar chamar um modelo
       const tryModel = async (modelId: string, modelName: string): Promise<string | null> => {
         try {
           if (modelId === "groq" && groqKey) {
@@ -351,7 +451,6 @@ export default function ChatPage() {
             return data.choices[0]?.message?.content ?? "Sem resposta.";
 
           } else if (modelId === "gemini" && geminiKey) {
-            // FASE 1 — Corrigir Gemini: Filtra mensagens system e usa systemInstruction separado
             const systemMessages = [{ role: "system", content: ZARITH_SYSTEM_PROMPT }];
             const chatMessages = [...history.filter(m => m.role !== "system"), { role: "user", content }];
             
@@ -359,29 +458,20 @@ export default function ChatPage() {
               `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`,
               {
                 method: "POST",
-                headers: { 
-                  "Content-Type": "application/json",
-                  "x-goog-api-key": geminiKey
-                },
+                headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
                 body: JSON.stringify({
-                  systemInstruction: {
-                    parts: [{ text: systemMessages.map(m => m.content).join("\n") }]
-                  },
-                  contents: chatMessages.map(msg => ({
-                    role: msg.role === "assistant" ? "model" : "user",
-                    parts: [{ text: msg.content }]
+                  system: { parts: [{ text: ZARITH_SYSTEM_PROMPT }] },
+                  contents: chatMessages.map(m => ({
+                    role: m.role === "user" ? "user" : "model",
+                    parts: [{ text: m.content }]
                   })),
-                  generationConfig: { temperature: 0.7, maxOutputTokens: 1024 }
-                }),
+                  generationConfig: { maxOutputTokens: 2048, temperature: 0.85 }
+                })
               }
             );
-            if (!res.ok) {
-              const errorBody = await res.text();
-              console.error(`[Gemini] Status ${res.status}: ${errorBody}`);
-              throw new Error(`${res.status}: ${errorBody}`);
-            }
+            if (!res.ok) throw new Error(`${res.status}`);
             const data = await res.json() as { candidates: { content: { parts: { text: string }[] } }[] };
-            return data.candidates[0]?.content?.parts[0]?.text ?? "Sem resposta.";
+            return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "Sem resposta.";
 
           } else if (modelId === "qwen" && orKey) {
             const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -393,7 +483,7 @@ export default function ChatPage() {
                 "X-Title": "Zarith AI",
               },
               body: JSON.stringify({
-                model: "qwen/qwen3-coder",
+                model: "qwen/qwen-2-72b-instruct",
                 messages: [
                   { role: "system", content: ZARITH_SYSTEM_PROMPT },
                   ...history,
@@ -439,13 +529,11 @@ export default function ChatPage() {
       // Cadeia de fallback: Groq → Gemini → DeepSeek → Qwen
       const fallbackChain = ["groq", "gemini", "deepseek", "qwen"];
 
-      // Tenta o modelo selecionado primeiro
       fullResponse = await tryModel(activeModel.id, activeModel.name) ?? "";
 
-      // Se falhar, tenta a cadeia de fallback
       if (!fullResponse) {
         for (const modelId of fallbackChain) {
-          if (modelId === activeModel.id) continue; // Pula o que já tentou
+          if (modelId === activeModel.id) continue;
           const modelDef = MODELS.find(m => m.id === modelId);
           if (modelDef) {
             console.log(`[Fallback] Tentando ${modelDef.name}...`);
@@ -466,7 +554,6 @@ export default function ChatPage() {
         }
       }
 
-      // Se nenhum modelo respondeu
       if (!fullResponse) {
         fullResponse = `⚠️ Nenhuma chave de API configurada para **${activeModel.name}**, Jadiel. Vai em **Configurações → API Keys** e bota a chave lá. Sem chave, sem resposta — é assim que funciona. Erro: ${lastError}`;
       }
@@ -493,45 +580,52 @@ export default function ChatPage() {
         await saveChatMessage(currentSessionId, "assistant", finalContent, activeModel.name);
       }
 
-      // Detecção de Intenções (Protocolo de Elite) e Autonomia
-      const contentLower = finalContent.toLowerCase();
+      // ── PROCESSAMENTO DE TOOL CALLS (Protocolo de Elite) ──
+      // Detecta tool_calls estruturados no formato JSON
+      const toolCallPattern = /\[TOOL_CALL\]\s*({[\s\S]*?})\s*\[\/TOOL_CALL\]/g;
+      const toolCallMatches = finalContent.matchAll(toolCallPattern);
+      const detectedToolCalls: ToolCall[] = [];
 
-      // Lógica de Autonomia (Fase 4) - Detecção de Tool Calls no texto
-      const githubToolMatch = finalContent.match(/\[TOOL_CALL:GITHUB:(REPOS|READ|CREATE|COMMIT):(.*?)\]/i);
-      if (githubToolMatch) {
-        const [_, action, paramsRaw] = githubToolMatch;
-        const params = JSON.parse(paramsRaw || "{}");
-        
-        const callId = Math.random().toString(36).substring(7);
-        const newToolCall: ToolCall = { id: callId, name: `github:${action.toLowerCase()}`, args: params, status: "calling" };
-        setToolCalls(prev => [...prev, newToolCall]);
-        setIsPlannerOpen(true);
-
+      for (const match of toolCallMatches) {
         try {
-          const endpoint = action.toLowerCase() === "repos" ? "/api/github/repos" : 
-                          action.toLowerCase() === "read" ? "/api/github/read-file" : 
-                          "/api/github/create-file";
-          
-          const toolRes = await fetch(`${window.location.origin}${endpoint}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(params)
+          const toolCallJson = JSON.parse(match[1]);
+          const callId = Math.random().toString(36).substring(7);
+          detectedToolCalls.push({
+            id: callId,
+            name: toolCallJson.name,
+            args: toolCallJson.args,
+            status: "calling"
           });
-          const toolData = await toolRes.json();
-          
-          setToolCalls(prev => prev.map(c => c.id === callId ? { ...c, status: "success", result: toolData } : c));
-          addLog('success', `Ferramenta GitHub:${action} executada com sucesso.`);
-          
-          // Se for uma ferramenta de leitura, a Zarith pode continuar o raciocínio
-          if (action.toLowerCase() === "read" || action.toLowerCase() === "repos") {
-             sendMessage(`Analisei os dados do GitHub: ${JSON.stringify(toolData).substring(0, 200)}... Continue o trabalho.`);
-          }
-        } catch (err) {
-          setToolCalls(prev => prev.map(c => c.id === callId ? { ...c, status: "error", result: String(err) } : c));
-          addLog('error', `Falha ao executar ferramenta GitHub:${action}`);
+        } catch (e) {
+          console.error("Erro ao parsear tool call:", e);
         }
       }
-      
+
+      // Se houver tool calls detectadas, atualiza o estado
+      if (detectedToolCalls.length > 0) {
+        setToolCalls(detectedToolCalls);
+        setPlannerSteps(detectedToolCalls.map((tc, idx) => ({
+          id: tc.id,
+          title: `Executar ${tc.name}`,
+          status: "pending" as const
+        })));
+        setIsPlannerOpen(true);
+        addLog('info', `Detectadas ${detectedToolCalls.length} ferramentas para executar`);
+
+        // Atualizar mensagem com tool_calls
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === "assistant") {
+            last.tool_calls = detectedToolCalls;
+          }
+          return updated;
+        });
+      }
+
+      // ── DETECÇÃO DE INTENÇÕES (Protocolo de Elite) ──
+      const contentLower = finalContent.toLowerCase();
+
       if (contentLower.includes("deploy") || contentLower.includes("publicar")) {
         addLog('thinking', 'Zarith identificou intenção de deploy.');
         setPendingAction({
@@ -580,10 +674,11 @@ export default function ChatPage() {
         }
         return updated;
       });
+      addLog('error', `Erro ao processar mensagem: ${zarithError}`);
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, activeModel, messages]);
+  }, [isLoading, activeModel, messages, currentSessionId, createNewSession, saveChatMessage, addLog]);
 
   const handleSendMessage = useCallback(() => {
     sendMessage(input);
@@ -592,8 +687,6 @@ export default function ChatPage() {
   const handleQuickAction = useCallback((message: string) => {
     sendMessage(message);
   }, [sendMessage]);
-
-  // handleNewChat já definido acima com lógica de persistência
 
   const handleRetry = useCallback((messageId: string) => {
     const idx = messages.findIndex((m) => m.id === messageId);
@@ -625,6 +718,32 @@ export default function ChatPage() {
       handleSendMessage();
     }
   };
+
+  // ── Executar tool calls com confirmação ──
+  const handleExecuteToolCalls = useCallback(async () => {
+    if (toolCalls.length === 0) return;
+
+    setIsPlannerOpen(true);
+    addLog('info', 'Iniciando execução de ferramentas...');
+
+    for (const toolCall of toolCalls) {
+      // Atualizar status para running
+      setPlannerSteps(prev => prev.map(step =>
+        step.id === toolCall.id ? { ...step, status: "running" as const } : step
+      ));
+
+      const result = await executeToolCall(toolCall, addLog, updateToolCall);
+
+      // Atualizar status no planner
+      setPlannerSteps(prev => prev.map(step =>
+        step.id === toolCall.id 
+          ? { ...step, status: result.status === "success" ? "completed" : "failed" }
+          : step
+      ));
+    }
+
+    addLog('success', 'Execução de ferramentas concluída');
+  }, [toolCalls, addLog, updateToolCall]);
 
   if (!authChecked) {
     return (
@@ -797,7 +916,6 @@ export default function ChatPage() {
                         }
                         else if (action.type === 'template') {
                           addLog('info', `Aplicando template: ${action.payload.name}`);
-                          // Lógica de aplicação de arquivos
                           addLog('success', `Template ${action.payload.name} injetado no projeto.`);
                         }
                       } catch (e: any) {
@@ -834,111 +952,91 @@ export default function ChatPage() {
                     animate={{ opacity: 1, y: 0 }}
                     className={`flex gap-3 md:gap-4 ${message.role === "user" ? "justify-end" : "justify-start"}`}
                   >
-                    {message.role === "assistant" && (
-                      <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-gradient-to-br from-[#00f5ff] to-[#bf00ff] flex items-center justify-center shrink-0 shadow-[0_0_10px_rgba(0,245,255,0.3)]">
-                        <span className="font-orbitron font-black text-xs text-[#020208]">Z</span>
-                      </div>
-                    )}
-
-                    <div className={`max-w-[85%] md:max-w-[75%] flex flex-col gap-1.5 ${message.role === "user" ? "items-end" : "items-start"}`}>
-                      {message.model && (
-                        <span className="text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest">
-                          {message.model}
-                        </span>
-                      )}
-                      <div
-                        className={`p-3.5 md:p-4 rounded-2xl font-mono text-sm leading-relaxed break-words ${
-                          message.role === "user"
-                            ? "bg-gradient-to-br from-[#00f5ff]/20 to-[#bf00ff]/20 border border-[#00f5ff]/30"
-                            : message.isError
-                            ? "bg-[#ff0080]/10 border border-[#ff0080]/30 text-[#ff0080]"
-                            : "bg-[var(--bg-card)] border border-[var(--border-glow)]"
-                        }`}
-                      >
-                        <pre className="whitespace-pre-wrap font-mono text-sm">
-                          {message.content}
-                        </pre>
-                      </div>
-
-                      {message.role === "assistant" && message.content && (
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => handleCopy(message.id, message.content)}
-                            title="Copiar"
-                            className="p-1.5 hover:text-[#00f5ff] text-[var(--text-secondary)] transition-colors"
-                          >
-                            {copiedId === message.id ? <Check size={13} className="text-[#00ff88]" /> : <Copy size={13} />}
-                          </button>
-                          <button
-                            onClick={() => handleRetry(message.id)}
-                            disabled={isLoading}
-                            title="Tentar novamente"
-                            className="p-1.5 hover:text-[#00f5ff] text-[var(--text-secondary)] transition-colors disabled:opacity-40"
-                          >
-                            <RotateCcw size={13} />
-                          </button>
+                    <div className={`flex gap-3 md:gap-4 max-w-2xl ${message.role === "user" ? "flex-row-reverse" : ""}`}>
+                      {message.role === "assistant" && (
+                        <div className="w-7 h-7 md:w-8 md:h-8 rounded-full bg-gradient-to-br from-[#00f5ff] to-[#bf00ff] flex items-center justify-center text-black font-bold text-xs shrink-0">
+                          Z
                         </div>
                       )}
+                      <div className={`flex flex-col gap-2 ${message.role === "user" ? "items-end" : ""}`}>
+                        <div
+                          className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                            message.role === "user"
+                              ? "bg-[#00f5ff]/20 border border-[#00f5ff]/30 text-white"
+                              : message.isError
+                              ? "bg-red-500/10 border border-red-500/30 text-red-200"
+                              : "bg-[var(--bg-card)] border border-[var(--border-glow)] text-[var(--text-primary)]"
+                          }`}
+                        >
+                          {message.content}
+                        </div>
+
+                        {/* Tool Call Stream */}
+                        {message.tool_calls && message.tool_calls.length > 0 && (
+                          <ToolCallStream calls={message.tool_calls} />
+                        )}
+
+                        {message.role === "assistant" && (
+                          <div className="flex gap-2 mt-1">
+                            <button
+                              onClick={() => handleCopy(message.id, message.content)}
+                              className="p-1.5 rounded hover:bg-white/5 transition-all"
+                              title="Copiar"
+                            >
+                              {copiedId === message.id ? (
+                                <Check size={14} className="text-green-400" />
+                              ) : (
+                                <Copy size={14} className="text-gray-400 hover:text-gray-300" />
+                              )}
+                            </button>
+                            <button
+                              onClick={() => handleRetry(message.id)}
+                              className="p-1.5 rounded hover:bg-white/5 transition-all"
+                              title="Tentar novamente"
+                            >
+                              <RotateCcw size={14} className="text-gray-400 hover:text-gray-300" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </motion.div>
                 ))}
               </AnimatePresence>
-
-              {isLoading && <ThinkingStream model={activeModel.name} />}
               <div ref={messagesEndRef} />
             </div>
           )}
         </div>
 
-        {/* Input */}
-        <div className="p-3 md:p-5 border-t border-[var(--border-glow)] bg-[var(--bg-secondary)] shrink-0">
-          <div className="max-w-4xl mx-auto">
-            <div className="flex items-end gap-2.5 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl px-3 py-2.5 focus-within:border-[#00f5ff] transition-all">
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Manda o papo pra Zarith..."
-                className="flex-1 bg-transparent outline-none resize-none font-mono text-sm max-h-32 min-h-[24px] leading-relaxed"
-                rows={1}
-              />
-              <button
-                onClick={handleSendMessage}
-                disabled={!input.trim() || isLoading}
-                className="p-2 bg-gradient-to-br from-[#00f5ff] to-[#bf00ff] text-[var(--bg-primary)] rounded-xl hover:brightness-110 transition-all disabled:opacity-40 shrink-0"
-              >
-                <Send size={17} />
-              </button>
-            </div>
-            <p className="text-center text-[10px] text-[var(--text-secondary)] mt-2 font-mono">
-              Enter para enviar · Shift+Enter para nova linha
-            </p>
+        {/* Input area */}
+        <div className="border-t border-[var(--border-glow)] bg-[var(--bg-secondary)] p-4 shrink-0">
+          <div className="max-w-4xl mx-auto flex gap-3">
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Manda a parada, Jadiel..."
+              className="flex-1 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl px-4 py-3 text-sm text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:outline-none focus:border-[#00f5ff] focus:ring-1 focus:ring-[#00f5ff]/30 resize-none"
+              rows={1}
+            />
+            <button
+              onClick={handleSendMessage}
+              disabled={isLoading || !input.trim()}
+              className="px-4 py-3 bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] text-black rounded-2xl font-bold text-sm hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
+            >
+              <Send size={16} />
+              <span className="hidden sm:inline">Enviar</span>
+            </button>
           </div>
         </div>
       </div>
-      <ExecutionLogs 
-        isOpen={isLogsOpen} 
-        onClose={() => setIsLogsOpen(false)} 
-        logs={logs} 
-      />
 
-      {/* Planejador Visual (Fase 4) */}
-      <AgentPlannerPanel 
-        steps={plannerSteps} 
-        isOpen={isPlannerOpen} 
-      />
+      {/* Planner Panel */}
+      <AgentPlannerPanel steps={plannerSteps} isOpen={isPlannerOpen} />
 
-      {/* Tool Call Stream (Fase 4) */}
-      <AnimatePresence>
-        {toolCalls.length > 0 && (
-          <div className="fixed bottom-24 left-1/2 -translate-x-1/2 w-full max-w-xl px-4 pointer-events-none">
-            <div className="pointer-events-auto">
-              <ToolCallStream calls={toolCalls} />
-            </div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* Execution Logs */}
+      <ExecutionLogs entries={logs} isOpen={isLogsOpen} onClose={() => setIsLogsOpen(false)} />
     </div>
   );
 }
