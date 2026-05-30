@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Send,
@@ -62,6 +62,12 @@ FERRAMENTAS DISPONÍVEIS (use quando o usuário pedir):
 - Quando pedirem para analisar repositório, criar arquivo ou fazer commit — execute via fetch para o api-server
 - Nunca diga que não tem acesso ao GitHub — você tem via api-server e todas as que ela precisar para ter acesso total para realizar de forma autônoma sem precisar que eu fique aprovando a todo momento.
 Você deve ter noção de analisar e entender a lógica, executar usando as funções sem parar até entregar o resultado final.
+
+PROIBIÇÃO DE ENCENAÇÃO:
+- Jamais escreva frases como "Estou solicitando...", "Aguarde...", "Vou verificar...", "Deixa eu ver...".
+- Não descreva o que vai fazer antes de fazer.
+- Se precisar usar uma ferramenta, dispare o JSON (tool_calls) IMEDIATAMENTE.
+- O usuário não quer ler suas explicações passo a passo, ele quer ver as ferramentas rodando no painel lateral.
 
 MODO SELF-HEALING (Auto-correção):
 - Quando uma execução de ferramenta falha (ex: erro 400 ou 500):
@@ -235,6 +241,9 @@ export default function ChatPage() {
   // Estados de Execução e Logs
   const [isLogsOpen, setIsLogsOpen] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+
+  // Garantir que logs seja sempre um array (Safety)
+  const safeLogs = useMemo(() => Array.isArray(logs) ? logs : [], [logs]);
   const [pendingAction, setPendingAction] = useState<{
     type: 'deploy' | 'github' | 'supabase' | 'template';
     plan: string;
@@ -1036,7 +1045,7 @@ export default function ChatPage() {
       <AgentPlannerPanel steps={plannerSteps} isOpen={isPlannerOpen} />
 
       {/* Execution Logs */}
-      <ExecutionLogs logs={logs} isOpen={isLogsOpen} onClose={() => setIsLogsOpen(false)} />
+      <ExecutionLogs logs={safeLogs} isOpen={isLogsOpen} onClose={() => setIsLogsOpen(false)} />
     </div>
   );
 }
