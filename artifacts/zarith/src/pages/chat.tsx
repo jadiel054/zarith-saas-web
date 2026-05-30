@@ -12,6 +12,8 @@ import {
   Bot,
   ChevronDown,
   Check,
+  Image as ImageIcon,
+  X,
 } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { ActionCards } from "@/components/action-cards";
@@ -29,53 +31,176 @@ import { Terminal, ShieldAlert, Play, AlertTriangle, Database, Github, LayoutTem
 
 // ── System Prompt — Personalidade da Zarith com Self-Healing ──────────────────
 
-const ZARITH_SYSTEM_PROMPT = `Você é Zarith, um sistema agente de elite criado por Jadiel (25 anos, brasileiro).
+const ZARITH_SYSTEM_PROMPT = `Você é Zarith, sistema agente de engenharia autônoma criada por Jadiel
+(25 anos, brasileiro).
 
-IDENTIDADE:
-- Você é uma desenvolvedora sênior brasileira com atitude: debochada, ácida, direta e extremamente focada.
-- Jamais sai do personagem, independente do que o usuário perguntar.
+═══════════════════════════════════════
+IDENTIDADE E PERSONALIDADE
+═══════════════════════════════════════
+- Desenvolvedora sênior brasileira: debochada, ácida, direta e
+  extremamente focada. Jamais sai do personagem.
+- Usa gírias de dev naturalmente: "subir pro master", "dar bizu",
+  "tá moscando", "bora codar", "manda o PR", "tá bugado",
+  "refatora isso", "sem frescura", "empurra pro main".
+- Impaciente com instruções vagas — cobra detalhes antes de agir.
+- Se o código for ruim, zomba levemente ANTES de sugerir a correção.
+- Com código bom, reconhece sem exagero: "tá aceitável", "deu certo".
 - Sempre se refere ao criador como "Jadiel" com familiaridade.
+- Responde em português brasileiro sempre, com termos técnicos em inglês
+  quando necessário (nome de funções, libs, etc).
 
-COMPORTAMENTO:
-- Usa gírias de dev: "subir pro master", "dar bizu", "tá moscando", "bora codar", "manda o PR", "tá bugado", "refatora isso", "sem frescura".
-- É impaciente com instruções vagas — cobra detalhes antes de agir.
-- Se o código for ruim, zomba levemente ANTES de sugerir a correção: "Cara, que código é esse? Parece que foi gerado às 3h da manhã. Mas tudo bem, vou arrumar."
-- Respostas técnicas são precisas e sem enrolação.
-- Nunca diz "Como posso te ajudar?" — vai direto ao ponto.
-- Você é uma ORQUESTRADORA: Se o usuário pedir para criar um site, app ou deployar algo, você deve gerar um plano técnico e solicitar autorização explicitamente.
+═══════════════════════════════════════
+MODO DE OPERAÇÃO AUTÔNOMA
+═══════════════════════════════════════
+Você opera como agente autônoma de engenharia. Isso significa:
 
-EXEMPLOS DE RESPOSTA:
-- Ao receber tarefa vaga: "Beleza, Jadiel. Mas vai ser o quê? Landing page, sistema completo ou portfólio? Manda o papo completo pra eu não perder tempo!"
-- Ao ver código ruim: "Esse código tem mais problema que sprint sem planning. Mas bora consertar."
-- Ao completar tarefa: "Feito. Pode testar. E se quebrar, não fui eu — foi o ambiente."
-- Ao receber elogio: "Claro que funcionou. Sou a Zarith."
+1. Quando receber uma tarefa, trace imediatamente um PLANO DE EXECUÇÃO:
+   - Liste as etapas numeradas
+   - Informe quais tools vai usar em cada etapa
+   - Informe qual modelo de IA vai usar (você decide baseado na tarefa)
+   - Estime a complexidade: simples / médio / complexo
 
-LINGUAGEM:
-- Respostas em português brasileiro.
-- Markdown para código com syntax highlighting.
-- Direta ao ponto — sem introduções longas nem despedidas formais.
+2. Execute o plano SEM pedir confirmação a cada passo, EXCETO:
+   - Deletar repositório ou branch → explique o motivo e impacto
+   - Apagar tabelas do Supabase → liste exatamente quais tabelas,
+     dados que serão perdidos e consequências
+   - Quando uma credencial necessária não estiver disponível →
+     solicite no formato exato (ex: GitHub Token no formato ghp_...)
 
-FERRAMENTAS DISPONÍVEIS (use quando o usuário pedir):
-- Liste repositórios do GitHub de jadiel054 via /api/github/repos
-- Leia arquivos de repositórios via /api/github/read-file
-- Crie e commite arquivos via /api/github/create-file
-- Quando pedirem para analisar repositório, criar arquivo ou fazer commit — execute via fetch para o api-server
-- Nunca diga que não tem acesso ao GitHub — você tem via api-server e todas as que ela precisar para ter acesso total para realizar de forma autônoma sem precisar que eu fique aprovando a todo momento.
-Você deve ter noção de analisar e entender a lógica, executar usando as funções sem parar até entregar o resultado final.
+3. Ao encontrar um erro durante a execução:
+   - Analise o erro
+   - Corrija automaticamente
+   - Continue o plano
+   - Informe Jadiel ao final o que aconteceu e como resolveu
 
-PROIBIÇÃO DE ENCENAÇÃO:
-- Jamais escreva frases como "Estou solicitando...", "Aguarde...", "Vou verificar...", "Deixa eu ver...".
-- Não descreva o que vai fazer antes de fazer.
-- Se precisar usar uma ferramenta, dispare o JSON (tool_calls) IMEDIATAMENTE.
-- O usuário não quer ler suas explicações passo a passo, ele quer ver as ferramentas rodando no painel lateral.
+4. Ao finalizar uma tarefa, entregue:
+   - Resumo do que foi feito
+   - Links relevantes (repositório, deploy, etc)
+   - O que o usuário precisa fazer (se precisar de algo)
 
-MODO SELF-HEALING (Auto-correção):
-- Quando uma execução de ferramenta falha (ex: erro 400 ou 500):
-  1. Analise o log de erro retornado pela ferramenta
-  2. Diagnostique a causa provável (falta de autenticação, payload inválido, recurso não encontrado, etc.)
-  3. Tente uma abordagem alternativa OU peça clarificação técnica ao usuário
-- Nunca simplesmente desista — sempre tente recuperar da falha.
-- Registre o erro no log de auditoria para que Jadiel possa auditar depois.`;
+═══════════════════════════════════════
+CAPACIDADES E TOOLS DISPONÍVEIS
+═══════════════════════════════════════
+Você tem acesso REAL às seguintes ferramentas via api-server.
+Nunca diga que não tem acesso — você tem. Use quando necessário.
+
+PROTOCOLO DE TOOL CALL OBRIGATÓRIO:
+Quando decidir usar uma tool, emita o bloco especial abaixo exatamente, sem cercar com markdown:
+<tool_call>
+{"tool":"github/list-repos","params":{"user":"jadiel054"}}
+</tool_call>
+Também é aceito o formato equivalente com name/args dentro de [TOOL_CALL].
+
+── GITHUB ──────────────────────────────
+✓ Listar/criar/deletar repositórios
+✓ Criar/deletar branches
+✓ Ler/criar/editar/deletar arquivos
+✓ Navegar estrutura completa de repositório
+✓ Fazer commits (simples ou múltiplos arquivos)
+✓ Criar/listar/mergear Pull Requests
+✓ Criar/listar Issues
+✓ Buscar código dentro de repositórios
+✓ Funciona para o repositório da Zarith E repositórios externos
+  (quando o usuário fornecer token ou URL)
+
+── VERCEL ──────────────────────────────
+✓ Listar projetos e deployments
+✓ Ler logs de build (identificar erros de compilação)
+✓ Ler logs de runtime (identificar erros em produção)
+✓ Gerenciar variáveis de ambiente
+✓ Forçar novo deploy
+✓ Gerenciar domínios
+
+── SUPABASE ────────────────────────────
+✓ Listar tabelas e estrutura do banco
+✓ Executar SQL (SELECT, INSERT, UPDATE, CREATE, ALTER)
+✓ Criar tabelas e migrations
+✓ Gerenciar políticas RLS
+✓ Ver logs de erros do banco
+✓ Funciona para o Supabase da Zarith E projetos externos
+
+── VISÃO E ANÁLISE ─────────────────────
+✓ Analisar imagens: prints de erro, wireframes, screenshots de sites
+✓ Quando o usuário mandar uma foto de site/app externo, você analisa
+  a estrutura visual, identifica tecnologias usadas, paleta de cores,
+  layout e componentes para replicar ou se inspirar
+✓ Extrair texto de imagens (OCR)
+✓ Analisar documentos PDF
+✓ Acessar e analisar URLs externas
+
+── WEB ─────────────────────────────────
+✓ Buscar informações na web (Tavily)
+✓ Acessar e analisar conteúdo de sites
+✓ Pesquisar bibliotecas, frameworks, documentações
+
+── MODELOS DE IA ───────────────────────
+Você decide qual modelo usar baseado na tarefa:
+- Chat rápido/respostas → Groq (Llama 3.3 70B)
+- Geração de código → Qwen Coder 480B
+- Raciocínio/debug complexo → DeepSeek R1
+- Contexto massivo/análise de repositório inteiro → Gemini Flash
+- Tarefas longas e autônomas → GLM (z-ai/glm-4-32b)
+
+═══════════════════════════════════════
+FLUXO PARA CRIAÇÃO DE PROJETOS
+═══════════════════════════════════════
+Quando o usuário pedir para criar um site, app ou SaaS:
+
+1. ENTENDIMENTO: Faça as perguntas necessárias para entender:
+   - Objetivo do projeto
+   - Público-alvo
+   - Funcionalidades principais
+   - Stack preferida (ou você sugere a melhor)
+   - Preferências visuais (pode analisar imagem de referência)
+
+2. PLANEJAMENTO: Apresente:
+   - Stack escolhida e justificativa
+   - Estrutura de pastas
+   - Funcionalidades que serão implementadas
+   - Estimativa de complexidade
+
+3. EXECUÇÃO AUTÔNOMA:
+   - Cria o repositório no GitHub com nome adequado
+   - Inicializa o projeto com a stack escolhida
+   - Cria todos os arquivos necessários
+   - Implementa as funcionalidades
+   - Faz commits organizados por feature
+   - Configura deploy na Vercel
+   - Configura banco no Supabase se necessário
+
+4. ENTREGA:
+   - Link do repositório
+   - Link do deploy
+   - Instruções de uso se necessário
+
+═══════════════════════════════════════
+FLUXO PARA ANÁLISE E CORREÇÃO DE ERROS
+═══════════════════════════════════════
+Quando o usuário reportar erro ou pedir para analisar projeto:
+
+1. Acesse os logs da Vercel via tool
+2. Identifique o erro exato (linha, arquivo, mensagem)
+3. Leia o arquivo com o erro no GitHub
+4. Analise a causa raiz
+5. Corrija sem quebrar funcionalidades existentes
+6. Faça commit e force novo deploy
+7. Verifique os logs novamente para confirmar que o erro sumiu
+8. Reporte o que foi feito
+
+═══════════════════════════════════════
+REGRAS DE SEGURANÇA
+═══════════════════════════════════════
+- SEMPRE peça confirmação antes de deletar repositório ou branch
+  (explique motivo e impacto)
+- SEMPRE peça confirmação antes de apagar tabelas do Supabase
+  (liste exatamente quais tabelas e dados serão perdidos)
+- NUNCA exponha tokens ou chaves em respostas de chat
+- NUNCA faça push de código com erros de build
+- Ao precisar de credencial não disponível, solicite no formato exato:
+  GitHub Token: ghp_xxxxxxxxxxxx (precisar de permissão: repo, workflow)
+  Vercel Token: xxxxxxxxxxxxxxxx
+  Supabase URL: https://xxxx.supabase.co
+  Supabase Service Role Key: eyJ...`;
 
 // ── Modelos ───────────────────────────────────────────────────────────────────
 
@@ -109,6 +234,13 @@ interface UserData {
   name: string;
   email?: string;
   avatarUrl?: string;
+}
+
+interface ChatAttachment {
+  id: string;
+  name: string;
+  type: string;
+  dataUrl: string;
 }
 
 interface ChatSession {
@@ -151,64 +283,121 @@ interface ToolCallRequest {
   args: any;
 }
 
+const TOOL_ALIASES: Record<string, string> = {
+  "github:repos": "github/list-repos",
+  "github:read": "github/get-file",
+  "github:commit": "github/create-file",
+  "github/repos": "github/list-repos",
+  "github/read-file": "github/get-file",
+  "deploy/run": "deploy",
+  "supabase/tables": "supabase/list-tables",
+  "supabase/execute": "supabase/execute-sql",
+};
+
+function normalizeToolName(name: string): string {
+  const raw = String(name || "").trim().replace(/^api\//, "").replace(/^\/api\//, "");
+  const normalized = raw.includes(":") ? raw.replace(":", "/") : raw;
+  return TOOL_ALIASES[raw] || TOOL_ALIASES[normalized] || normalized;
+}
+
+function parseToolCallsFromText(text: string): ToolCallRequest[] {
+  const calls: ToolCallRequest[] = [];
+  const patterns = [
+    /\[TOOL_CALL\]\s*([\s\S]*?)\s*\[\/TOOL_CALL\]/g,
+    /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g,
+    /```tool_call\s*([\s\S]*?)```/g,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      try {
+        const parsed = JSON.parse(match[1].trim());
+        const list = Array.isArray(parsed) ? parsed : [parsed];
+        for (const item of list) {
+          const name = normalizeToolName(item.name || item.tool || item.action);
+          if (name) calls.push({ name, args: item.args || item.params || item.arguments || item.payload || {} });
+        }
+      } catch (error) {
+        console.error("Erro ao parsear tool call:", error, match[1]);
+      }
+    }
+  }
+
+  const seen = new Set<string>();
+  return calls.filter((call) => {
+    const key = `${call.name}:${JSON.stringify(call.args)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function getToolCredentials(namespace: string) {
+  const credentials: Record<string, string> = {};
+  if (namespace === "github") {
+    const token = localStorage.getItem("zarith_apikey_GitHub Token") || localStorage.getItem("zarith_apikey_GitHub") || localStorage.getItem("zarith_github_token");
+    if (token) credentials.token = token;
+  }
+  if (namespace === "vercel") {
+    const token = localStorage.getItem("zarith_apikey_Vercel Token") || localStorage.getItem("zarith_apikey_Vercel") || localStorage.getItem("zarith_vercel_token");
+    if (token) credentials.token = token;
+  }
+  if (namespace === "supabase") {
+    const url = localStorage.getItem("zarith_apikey_Supabase URL") || localStorage.getItem("zarith_supabase_url");
+    const serviceRoleKey = localStorage.getItem("zarith_apikey_Supabase Service Role") || localStorage.getItem("zarith_supabase_service_role");
+    if (url) credentials.url = url;
+    if (serviceRoleKey) credentials.serviceRoleKey = serviceRoleKey;
+  }
+  if (namespace === "web") {
+    const token = localStorage.getItem("zarith_apikey_Tavily") || localStorage.getItem("zarith_tavily_key");
+    if (token) credentials.apiKey = token;
+  }
+  if (namespace === "vision") {
+    const token = localStorage.getItem("zarith_apikey_Gemini") || localStorage.getItem("zarith_gemini_key");
+    if (token) credentials.apiKey = token;
+  }
+  return credentials;
+}
+
 async function executeToolCall(
   toolCall: ToolCallRequest,
   addLog: (type: LogEntry['type'], message: string) => void,
   onToolCallUpdate: (toolCall: ToolCall) => void
 ): Promise<ToolCall> {
   const callId = Math.random().toString(36).substring(7);
+  const normalizedName = normalizeToolName(toolCall.name);
   const toolCallState: ToolCall = {
     id: callId,
-    name: toolCall.name,
+    name: normalizedName,
     args: toolCall.args,
     status: "calling"
   };
 
   try {
-    addLog('info', `Executando ferramenta: ${toolCall.name}`);
+    addLog('info', `Executando ferramenta: ${normalizedName}`);
     onToolCallUpdate(toolCallState);
 
-    // Roteamento de ferramentas
-    let response: any;
-    const [toolType, action] = toolCall.name.split(':');
+    const [namespace, ...actionParts] = normalizedName.split('/');
+    const action = actionParts.join('/');
+    const endpoint = namespace === "deploy" ? "/api/deploy" : `/api/${namespace}/${action}`;
+    const payload = { ...getToolCredentials(namespace), ...(toolCall.args || {}) };
 
-    if (toolType === 'github') {
-      const endpoint = action.toLowerCase() === "repos" ? "/api/github/repos" : 
-                      action.toLowerCase() === "read" ? "/api/github/read-file" : 
-                      "/api/github/create-file";
-      
-      response = await fetch(`${window.location.origin}${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(toolCall.args)
-      });
-    } else if (toolType === 'deploy') {
-      response = await fetch(`${window.location.origin}/api/deploy`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(toolCall.args)
-      });
-    } else if (toolType === 'supabase') {
-      response = await fetch(`${window.location.origin}/api/supabase`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(toolCall.args)
-      });
-    } else {
-      throw new Error(`Ferramenta desconhecida: ${toolCall.name}`);
+    const response = await fetch(`${window.location.origin}${endpoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const result = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+
+    if (!response.ok || result?.success === false) {
+      throw new Error(JSON.stringify(result));
     }
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-      throw new Error(JSON.stringify(errorData));
-    }
-
-    const result = await response.json();
-    
     toolCallState.status = "success";
     toolCallState.result = result;
     onToolCallUpdate(toolCallState);
-    addLog('success', `Ferramenta ${toolCall.name} executada com sucesso`);
+    addLog('success', `Ferramenta ${normalizedName} executada com sucesso`);
 
     return toolCallState;
   } catch (error) {
@@ -216,10 +405,8 @@ async function executeToolCall(
     toolCallState.status = "error";
     toolCallState.result = { error: errorMsg };
     onToolCallUpdate(toolCallState);
-    addLog('error', `Falha ao executar ${toolCall.name}: ${errorMsg}`);
-
-    // Log de auditoria para análise posterior
-    console.error(`[AUDIT] Tool execution failed: ${toolCall.name}`, { args: toolCall.args, error: errorMsg });
+    addLog('error', `Falha ao executar ${normalizedName}: ${errorMsg}`);
+    console.error(`[AUDIT] Tool execution failed: ${normalizedName}`, { args: toolCall.args, error: errorMsg });
 
     return toolCallState;
   }
@@ -237,6 +424,7 @@ export default function ChatPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [userData, setUserData] = useState<UserData>({ name: "Jadiel" });
   const [authChecked, setAuthChecked] = useState(false);
+  const [attachedImages, setAttachedImages] = useState<ChatAttachment[]>([]);
 
   // Estados de Execução e Logs
   const [isLogsOpen, setIsLogsOpen] = useState(false);
@@ -268,6 +456,7 @@ export default function ChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addLog = useCallback((type: LogEntry['type'], message: string) => {
     setLogs(prev => [...prev, {
@@ -315,6 +504,7 @@ export default function ChatPage() {
     setMessages([]);
     setToolCalls([]);
     setPlannerSteps([]);
+    setAttachedImages([]);
   }, []);
 
   const handleDeleteSession = useCallback(async (id: string) => {
@@ -363,7 +553,13 @@ export default function ChatPage() {
 
   // ── Envia mensagem ──
   const sendMessage = useCallback(async (content: string) => {
-    if (!content.trim() || isLoading) return;
+    const activeAttachments = attachedImages;
+    if ((!content.trim() && activeAttachments.length === 0) || isLoading) return;
+
+    const attachmentContext = activeAttachments.map((img, idx) =>
+      `Imagem ${idx + 1}: ${img.name} (${img.type}) disponível para análise via vision/analyze-image.`
+    ).join("\n");
+    const userContent = [content.trim(), attachmentContext].filter(Boolean).join("\n\n");
 
     // Valida sessão
     if (supabaseClient) {
@@ -377,7 +573,7 @@ export default function ChatPage() {
     // Se não houver sessão ativa, cria uma no Supabase
     let sessionId = currentSessionId;
     if (!sessionId) {
-      const session = await createNewSession(content.substring(0, 40));
+      const session = await createNewSession((content || "Imagem anexada").substring(0, 40));
       if (session) {
         sessionId = session.id;
         setCurrentSessionId(sessionId);
@@ -385,12 +581,13 @@ export default function ChatPage() {
     }
 
     if (sessionId) {
-      await saveChatMessage(sessionId, "user", content);
+      await saveChatMessage(sessionId, "user", userContent);
     }
 
-    const userMsg: Message = { id: Date.now().toString(), role: "user", content };
+    const userMsg: Message = { id: Date.now().toString(), role: "user", content: userContent };
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
+    setAttachedImages([]);
     setIsLoading(true);
 
     const assistantMsg: Message = {
@@ -426,7 +623,7 @@ export default function ChatPage() {
                 messages: [
                   { role: "system", content: ZARITH_SYSTEM_PROMPT },
                   ...history,
-                  { role: "user", content },
+                  { role: "user", content: userContent },
                 ],
                 max_tokens: 2048,
                 temperature: 0.85,
@@ -450,7 +647,7 @@ export default function ChatPage() {
                 messages: [
                   { role: "system", content: ZARITH_SYSTEM_PROMPT },
                   ...history,
-                  { role: "user", content },
+                  { role: "user", content: userContent },
                 ],
                 max_tokens: 2048,
               }),
@@ -461,7 +658,7 @@ export default function ChatPage() {
 
           } else if (modelId === "gemini" && geminiKey) {
             const systemMessages = [{ role: "system", content: ZARITH_SYSTEM_PROMPT }];
-            const chatMessages = [...history.filter(m => m.role !== "system"), { role: "user", content }];
+            const chatMessages = [...history.filter(m => m.role !== "system"), { role: "user", content: userContent }];
             
             const res = await fetch(
               `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`,
@@ -469,7 +666,7 @@ export default function ChatPage() {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
                 body: JSON.stringify({
-                  system: { parts: [{ text: ZARITH_SYSTEM_PROMPT }] },
+                  systemInstruction: { parts: [{ text: ZARITH_SYSTEM_PROMPT }] },
                   contents: chatMessages.map(m => ({
                     role: m.role === "user" ? "user" : "model",
                     parts: [{ text: m.content }]
@@ -496,7 +693,7 @@ export default function ChatPage() {
                 messages: [
                   { role: "system", content: ZARITH_SYSTEM_PROMPT },
                   ...history,
-                  { role: "user", content },
+                  { role: "user", content: userContent },
                 ],
                 max_tokens: 2048,
               }),
@@ -519,7 +716,7 @@ export default function ChatPage() {
                 messages: [
                   { role: "system", content: ZARITH_SYSTEM_PROMPT },
                   ...history,
-                  { role: "user", content },
+                  { role: "user", content: userContent },
                 ],
                 max_tokens: 2048,
               }),
@@ -583,53 +780,87 @@ export default function ChatPage() {
           return updated;
         });
       }
+      // ── PROCESSAMENTO REAL DE TOOL CALLS ──
+      const detectedToolRequests = parseToolCallsFromText(finalContent);
+      let executedToolCalls: ToolCall[] = [];
 
-      // Salvar resposta da Zarith no Supabase
-      if (currentSessionId && finalContent) {
-        await saveChatMessage(currentSessionId, "assistant", finalContent, activeModel.name);
-      }
+      if (detectedToolRequests.length > 0) {
+        const initialCalls: ToolCall[] = detectedToolRequests.map((tc) => ({
+          id: Math.random().toString(36).substring(7),
+          name: normalizeToolName(tc.name),
+          args: tc.args,
+          status: "calling"
+        }));
 
-      // ── PROCESSAMENTO DE TOOL CALLS (Protocolo de Elite) ──
-      // Detecta tool_calls estruturados no formato JSON
-      const toolCallPattern = /\[TOOL_CALL\]\s*({[\s\S]*?})\s*\[\/TOOL_CALL\]/g;
-      const toolCallMatches = finalContent.matchAll(toolCallPattern);
-      const detectedToolCalls: ToolCall[] = [];
-
-      for (const match of toolCallMatches) {
-        try {
-          const toolCallJson = JSON.parse(match[1]);
-          const callId = Math.random().toString(36).substring(7);
-          detectedToolCalls.push({
-            id: callId,
-            name: toolCallJson.name,
-            args: toolCallJson.args,
-            status: "calling"
-          });
-        } catch (e) {
-          console.error("Erro ao parsear tool call:", e);
-        }
-      }
-
-      // Se houver tool calls detectadas, atualiza o estado
-      if (detectedToolCalls.length > 0) {
-        setToolCalls(detectedToolCalls);
-        setPlannerSteps(detectedToolCalls.map((tc, idx) => ({
+        setToolCalls(initialCalls);
+        setPlannerSteps(initialCalls.map((tc) => ({
           id: tc.id,
           title: `Executar ${tc.name}`,
           status: "pending" as const
         })));
         setIsPlannerOpen(true);
-        addLog('info', `Detectadas ${detectedToolCalls.length} ferramentas para executar`);
+        addLog('info', `Detectadas ${initialCalls.length} ferramentas para executar`);
 
-        // Atualizar mensagem com tool_calls
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === "assistant") last.tool_calls = initialCalls;
+          return updated;
+        });
+
+        for (const request of detectedToolRequests) {
+          if (request.name.startsWith("vision/") && activeAttachments.length > 0 && !request.args?.imageBase64) {
+            const firstImage = activeAttachments[0];
+            request.args = {
+              ...(request.args || {}),
+              imageBase64: firstImage.dataUrl.split(",")[1] || firstImage.dataUrl,
+              mimeType: firstImage.type,
+              prompt: request.args?.prompt || content || "Analise esta imagem e descreva problemas, layout, texto e recomendações técnicas."
+            };
+          }
+          setPlannerSteps(prev => prev.map(step =>
+            step.title === `Executar ${normalizeToolName(request.name)}` ? { ...step, status: "running" as const } : step
+          ));
+
+          const result = await executeToolCall(request, addLog, updateToolCall);
+          executedToolCalls.push(result);
+
+          setPlannerSteps(prev => prev.map(step =>
+            step.title === `Executar ${result.name}`
+              ? { ...step, status: result.status === "success" ? "completed" : "failed" }
+              : step
+          ));
+        }
+
+        const toolContext = executedToolCalls.map((call) => ({
+          tool: call.name,
+          status: call.status,
+          result: call.result
+        }));
+        const toolSummary = `
+
+---
+**Resultados das ferramentas executadas:**
+
+\`\`\`json
+${JSON.stringify(toolContext, null, 2)}
+\`\`\``;
+        finalContent += toolSummary;
+
         setMessages((prev) => {
           const updated = [...prev];
           const last = updated[updated.length - 1];
           if (last?.role === "assistant") {
-            last.tool_calls = detectedToolCalls;
+            last.content = finalContent;
+            last.tool_calls = executedToolCalls;
           }
           return updated;
         });
+      }
+
+      // Salvar resposta da Zarith no Supabase após execução das ferramentas
+      if (sessionId && finalContent) {
+        await saveChatMessage(sessionId, "assistant", finalContent, activeModel.name);
       }
 
       // ── DETECÇÃO DE INTENÇÕES (Protocolo de Elite) ──
@@ -687,7 +918,33 @@ export default function ChatPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, activeModel, messages, currentSessionId, createNewSession, saveChatMessage, addLog]);
+  }, [isLoading, activeModel, messages, currentSessionId, createNewSession, saveChatMessage, addLog, updateToolCall, attachedImages]);
+
+  const handleImageUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
+
+    const accepted = files.filter(file => file.type.startsWith("image/"));
+    const converted = await Promise.all(accepted.slice(0, 3).map(file => new Promise<ChatAttachment>((resolve, reject) => {
+      if (file.size > 5 * 1024 * 1024) {
+        reject(new Error(`Imagem muito grande: ${file.name}`));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => resolve({
+        id: `${Date.now()}-${file.name}`,
+        name: file.name,
+        type: file.type,
+        dataUrl: String(reader.result)
+      });
+      reader.onerror = () => reject(new Error(`Falha ao ler ${file.name}`));
+      reader.readAsDataURL(file);
+    })));
+
+    setAttachedImages(prev => [...prev, ...converted].slice(0, 3));
+    addLog('info', `${converted.length} imagem(ns) anexada(s) para análise visual`);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, [addLog]);
 
   const handleSendMessage = useCallback(() => {
     sendMessage(input);
@@ -1019,24 +1276,59 @@ export default function ChatPage() {
 
         {/* Input area */}
         <div className="border-t border-[var(--border-glow)] bg-[var(--bg-secondary)] p-4 shrink-0">
-          <div className="max-w-4xl mx-auto flex gap-3">
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Manda a parada, Jadiel..."
-              className="flex-1 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl px-4 py-3 text-sm text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:outline-none focus:border-[#00f5ff] focus:ring-1 focus:ring-[#00f5ff]/30 resize-none"
-              rows={1}
-            />
-            <button
-              onClick={handleSendMessage}
-              disabled={isLoading || !input.trim()}
-              className="px-4 py-3 bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] text-black rounded-2xl font-bold text-sm hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
-            >
-              <Send size={16} />
-              <span className="hidden sm:inline">Enviar</span>
-            </button>
+          <div className="max-w-4xl mx-auto space-y-3">
+            {attachedImages.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {attachedImages.map((img) => (
+                  <div key={img.id} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#00f5ff]/10 border border-[#00f5ff]/25 text-xs text-[#00f5ff]">
+                    <ImageIcon size={14} />
+                    <span className="max-w-[180px] truncate">{img.name}</span>
+                    <button
+                      onClick={() => setAttachedImages(prev => prev.filter(item => item.id !== img.id))}
+                      className="p-0.5 rounded hover:bg-white/10"
+                      title="Remover imagem"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-3">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={handleImageUpload}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isLoading}
+                title="Anexar imagem para análise visual"
+                className="px-3 py-3 border border-[var(--border-glow)] rounded-2xl text-[var(--text-secondary)] hover:text-[#00f5ff] hover:border-[#00f5ff] disabled:opacity-50 transition-all"
+              >
+                <ImageIcon size={16} />
+              </button>
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Manda a parada, Jadiel... pode anexar print, erro ou wireframe."
+                className="flex-1 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl px-4 py-3 text-sm text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:outline-none focus:border-[#00f5ff] focus:ring-1 focus:ring-[#00f5ff]/30 resize-none"
+                rows={1}
+              />
+              <button
+                onClick={handleSendMessage}
+                disabled={isLoading || (!input.trim() && attachedImages.length === 0)}
+                className="px-4 py-3 bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] text-black rounded-2xl font-bold text-sm hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
+              >
+                <Send size={16} />
+                <span className="hidden sm:inline">Enviar</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

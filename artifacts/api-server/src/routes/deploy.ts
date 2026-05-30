@@ -53,7 +53,7 @@ router.post("/create", async (req: Request, res: Response): Promise<any> => {
  */
 router.get("/status/:deploymentId", async (req: Request, res: Response): Promise<any> => {
   try {
-    const { deploymentId } = req.params;
+    const deploymentId = String(req.params.deploymentId || "");
 
     if (!deploymentId) {
       return res.status(400).json({ error: "deploymentId é obrigatório" });
@@ -86,7 +86,7 @@ router.get("/status/:deploymentId", async (req: Request, res: Response): Promise
  */
 router.delete("/:deploymentId", async (req: Request, res: Response): Promise<any> => {
   try {
-    const { deploymentId } = req.params;
+    const deploymentId = String(req.params.deploymentId || "");
 
     if (!deploymentId) {
       return res.status(400).json({ error: "deploymentId é obrigatório" });
@@ -119,7 +119,7 @@ router.delete("/:deploymentId", async (req: Request, res: Response): Promise<any
  */
 router.get("/list/:projectId", async (req: Request, res: Response): Promise<any> => {
   try {
-    const { projectId } = req.params;
+    const projectId = String(req.params.projectId || "");
 
     if (!projectId) {
       return res.status(400).json({ error: "projectId é obrigatório" });

@@ -128,6 +128,19 @@ async function testGithubToken(key: string): Promise<string | null> {
   }
 }
 
+async function testVercelToken(key: string): Promise<string | null> {
+  try {
+    const res = await fetch("https://api.vercel.com/v9/projects", {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    if (res.ok) return null;
+    if (res.status === 401 || res.status === 403) return "Token Vercel inválido ou sem permissão.";
+    return `Erro ${res.status}: ${res.statusText}`;
+  } catch {
+    return "Erro de conexão ao validar o token Vercel.";
+  }
+}
+
 async function testSupabaseServiceRoleKey(key: string): Promise<string | null> {
   try {
     // Busca a URL tanto do localStorage quanto do que pode estar sendo digitado (se implementado)
@@ -178,6 +191,7 @@ const SERVICE_TESTERS: Record<string, (key: string) => Promise<string | null>> =
   OpenRouter: testOpenRouterKey,
   Tavily: testTavilyKey,
   "GitHub Token": testGithubToken,
+  "Vercel Token": testVercelToken,
   Greptile: testGreptileKey,
   "Supabase Service Role": testSupabaseServiceRoleKey,
   "Supabase URL": testSupabaseUrl,
@@ -188,6 +202,7 @@ const SERVICES = [
   { name: "OpenRouter",  placeholder: "sk-or-...", description: "Acesso a 100+ modelos de IA" },
   { name: "Gemini",      placeholder: "AIza...",   description: "Google Gemini Flash/Pro" },
   { name: "GitHub Token",placeholder: "ghp_...",   description: "Análise de repositórios" },
+  { name: "Vercel Token",placeholder: "vercel_...", description: "Deploy, logs e variáveis de ambiente" },
   { name: "Greptile",    placeholder: "gk-...",    description: "Busca semântica em código" },
   { name: "Tavily",      placeholder: "tvly-...",  description: "Web search em tempo real" },
   { name: "Supabase URL", placeholder: "https://xxx.supabase.co", description: "URL do seu projeto Supabase" },

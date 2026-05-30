@@ -1,13 +1,15 @@
 {
-  "buildCommand": "pnpm --filter @workspace/zarith run build",
+  "version": 2,
+  "buildCommand": "pnpm --config.verify-deps-before-run=false --filter @workspace/api-server run build && pnpm --config.verify-deps-before-run=false --filter @workspace/zarith run build",
   "outputDirectory": "artifacts/zarith/dist/public",
-  "installCommand": "pnpm install",
+  "installCommand": "pnpm install --ignore-scripts",
   "framework": null,
   "env": {
     "BASE_PATH": "/",
     "NODE_ENV": "production"
   },
   "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index.mjs" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

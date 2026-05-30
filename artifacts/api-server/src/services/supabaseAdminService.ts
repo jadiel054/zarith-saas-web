@@ -64,7 +64,7 @@ export const supabaseAdminService = {
       const client = getSupabaseClient();
 
       // Usar rpc ou query direto dependendo do tipo de operação
-      const { data, error, status } = await client.rpc("execute_sql", {
+      const { data, error } = await (client as any).rpc("execute_sql", {
         query: sql,
         params: params || [],
       });
@@ -76,13 +76,13 @@ export const supabaseAdminService = {
       const result: SQLExecutionResponse = {
         success: true,
         data,
-        rowsAffected: data?.rowCount || 0,
+        rowsAffected: (data as any)?.rowCount || 0,
       };
 
       logger.info({ result }, "SQL executado com sucesso");
       auditLog("supabase:sql:execute:success", { 
         sqlLength: sql.length,
-        rowsAffected: data?.rowCount || 0
+        rowsAffected: (data as any)?.rowCount || 0
       });
 
       return result;

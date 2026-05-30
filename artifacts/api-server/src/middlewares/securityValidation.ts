@@ -76,7 +76,7 @@ const SECURITY_POLICIES: SecurityPolicy[] = [
   {
     operationType: "write:create_table",
     dangerLevel: OperationDangerLevel.CAUTION,
-    description": "Criar tabela no banco de dados",
+    description: "Criar tabela no banco de dados",
     requiresConfirmation: false,
     requiresExplanation: false,
   },
