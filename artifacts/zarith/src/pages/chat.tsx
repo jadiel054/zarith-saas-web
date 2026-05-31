@@ -26,7 +26,7 @@ import { useChatPersistence } from "@/hooks/useChatPersistence";
 import { ExecutionLogs, LogEntry } from "@/components/execution-logs";
 import { AgentPlannerPanel, PlanStep } from "@/components/agent-planner-panel";
 import { ToolCallStream, ToolCall } from "@/components/tool-call-stream";
-import { formatGitHubReposForModel } from "@/services/tools/formatForModel";
+import { formatGitHubReposForModel, formatSupabaseTablesForModel, formatVercelProjectsForModel } from "@/services/tools/formatForModel";
 import { deployService } from "@/services/execution/deploy";
 import { githubService } from "@/services/execution/github";
 import { messagesService } from "@/services/database/messages";
@@ -859,17 +859,11 @@ ${executedToolCalls.map(call => {
   }
 
   if (call.name === "vercel/list-projects") {
-    const res = call.result as any;
-    if (Array.isArray(res?.projects)) {
-      const table = "| Projeto | Framework | Último deploy | Link |\n| :--- | :--- | :--- | :--- |\n" +
-        res.projects.slice(0, 10).map((p: any) => `| **${p.name}** | ${p.framework || 'N/A'} | ${p.updatedAt ? new Date(p.updatedAt).toLocaleDateString() : 'N/A'} | ${p.link ? `[Abrir](https://${p.link})` : 'N/A'} |`).join("\n");
-      return `Projetos na Vercel:\n\n${table}`;
-    }
+    return `${formatVercelProjectsForModel(call.result)}\n\n> Renderizei os projetos da Vercel em cards neon com status, framework, URL de produção e data de atualização.`;
   }
 
   if (call.name === "supabase/list-tables") {
-    const res = call.result as any;
-    if (Array.isArray(res)) return `Tabelas no Supabase:\n\n${res.map((t: any) => `- **${t.table_name}** (${t.table_schema})`).join("\n")}`;
+    return `${formatSupabaseTablesForModel(call.result)}\n\n> Renderizei as tabelas do Supabase em cards visuais com badge por schema, sem JSON cru.`;
   }
 
   return `**${call.name}** executado com sucesso. Os detalhes técnicos ficam recolhidos no cartão da ferramenta.`;

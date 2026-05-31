@@ -1,6 +1,8 @@
 import { AlertTriangle, CheckCircle2, ChevronRight, Terminal, XCircle } from "lucide-react";
 import { motion } from "framer-motion";
 import { GitHubReposResult } from "@/components/tool-results/github/GitHubReposResult";
+import { SupabaseTablesResult } from "@/components/tool-results/supabase/SupabaseTablesResult";
+import { VercelProjectsResult } from "@/components/tool-results/vercel/VercelProjectsResult";
 import type { AppToolCall } from "@/types/tools";
 
 interface ToolResultRendererProps {
@@ -90,6 +92,14 @@ function GenericToolResult({ call }: { call: AppToolCall }) {
 export function ToolResultRenderer({ call }: ToolResultRendererProps) {
   if (call.status === "success" && call.name === "github/list-repos") {
     return <GitHubReposResult result={call.result} />;
+  }
+
+  if (call.status === "success" && call.name === "vercel/list-projects") {
+    return <VercelProjectsResult result={call.result} />;
+  }
+
+  if (call.status === "success" && call.name === "supabase/list-tables") {
+    return <SupabaseTablesResult result={call.result} />;
   }
 
   return <GenericToolResult call={call} />;

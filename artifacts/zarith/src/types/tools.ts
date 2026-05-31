@@ -32,3 +32,30 @@ export interface NormalizedGitHubReposResult {
   displayed: number;
   source?: string;
 }
+
+export interface VercelProjectSummary {
+  name: string;
+  latest_deploy_status: "Ready" | "Error" | "Building" | "Queued" | "Canceled" | "Unknown" | string;
+  production_url: string;
+  framework: string | null;
+  updated_at: string | null;
+}
+
+export interface NormalizedVercelProjectsResult {
+  projects: VercelProjectSummary[];
+  total: number;
+  displayed: number;
+  source?: string;
+}
+
+export interface SupabaseTableSummary {
+  table_name: string;
+  table_schema: string;
+}
+
+export interface NormalizedSupabaseTablesResult {
+  tables: SupabaseTableSummary[];
+  total: number;
+  displayed: number;
+  source?: string;
+}
