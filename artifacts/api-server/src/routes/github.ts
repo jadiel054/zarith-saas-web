@@ -26,7 +26,7 @@ router.post(["/get-user", "/user"], async (req: Request, res: Response) => {
   catch (error) { return sendError(res, error, "Não foi possível obter o usuário autenticado do GitHub."); }
 });
 
-router.post(["/list-repos", "/repos"], async (req: Request, res: Response) => {
+router.all(["/list-repos", "/repos"], async (req: Request, res: Response) => {
   try {
     const body = getBody(req);
     const visibility = body.visibility || "all";
@@ -68,7 +68,7 @@ router.post("/delete-repo", async (req: Request, res: Response) => {
   } catch (error) { return sendError(res, error, "Não foi possível deletar o repositório."); }
 });
 
-router.post("/list-branches", async (req: Request, res: Response) => {
+router.all("/list-branches", async (req: Request, res: Response) => {
   try { const { owner, repo } = repoParts(req); return res.json({ success: true, data: await gh(req, `/repos/${owner}/${repo}/branches?per_page=100`) }); }
   catch (error) { return sendError(res, error, "Não foi possível listar branches."); }
 });
@@ -94,7 +94,7 @@ router.post("/delete-branch", async (req: Request, res: Response) => {
   } catch (error) { return sendError(res, error, "Não foi possível deletar branch."); }
 });
 
-router.post(["/get-file", "/read-file"], async (req: Request, res: Response) => {
+router.all(["/get-file", "/read-file"], async (req: Request, res: Response) => {
   try {
     const body = getBody(req); const { owner, repo } = repoParts(req); const filePath = required(body.path || body.filePath, "path");
     const ref = body.ref || body.branch ? `?ref=${encodeURIComponent(body.ref || body.branch)}` : "";
@@ -104,7 +104,7 @@ router.post(["/get-file", "/read-file"], async (req: Request, res: Response) => 
   } catch (error) { return sendError(res, error, "Não foi possível ler arquivo do GitHub."); }
 });
 
-router.post(["/list-files"], async (req: Request, res: Response) => {
+router.all(["/list-files"], async (req: Request, res: Response) => {
   try {
     const body = getBody(req); const { owner, repo } = repoParts(req); const dir = body.path || "";
     const ref = body.ref || body.branch ? `?ref=${encodeURIComponent(body.ref || body.branch)}` : "";

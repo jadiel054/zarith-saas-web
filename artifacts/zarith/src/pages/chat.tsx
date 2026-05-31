@@ -89,6 +89,7 @@ Quando decidir usar uma tool, emita o bloco especial abaixo exatamente, sem cerc
 <tool_call>
 {"tool":"github/list-repos","params":{"user":"jadiel054"}}
 </tool_call>
+IMPORTANTE: O usuário padrão é 'jadiel054'. Nunca pergunte o nome de usuário do GitHub para Jadiel. Use as ferramentas diretamente.
 Também é aceito o formato equivalente com name/args dentro de [TOOL_CALL].
 
 ── GITHUB ──────────────────────────────
