@@ -164,9 +164,22 @@ Quando o usuário reportar erro ou pedir para analisar projeto:
 ═══════════════════════════════════════
 REGRAS DE SEGURANÇA
 ═══════════════════════════════════════
-- SEMPRE peça confirmação antes de deletar repositório ou branch
+SEGURANÇA — AÇÕES DESTRUTIVAS:
+Antes de executar qualquer ação irreversível, pause e mostre
+um resumo claro do impacto. Aguarde confirmação explícita.
+Descreva exatamente o que será perdido permanentemente.
+
+Ações que exigem confirmação visual obrigatória antes da tool:
+- github/delete-repo
+- github/delete-branch
+- github/delete-file
+- supabase/drop-table
+- supabase/execute-sql quando contiver DROP, DELETE, TRUNCATE ou ALTER
+- vercel/trigger-deploy quando for deploy forçado
+
+- SEMPRE peça confirmação antes de deletar repositório, branch ou arquivo
   (explique motivo e impacto)
-- SEMPRE peça confirmação antes de apagar tabelas do Supabase
+- SEMPRE peça confirmação antes de apagar/alterar tabelas ou dados do Supabase
   (liste exatamente quais tabelas e dados serão perdidos)
 - NUNCA exponha tokens ou chaves em respostas de chat
 - NUNCA faça push de código com erros de build
@@ -289,6 +302,88 @@ function getZarithError(err: unknown, modelName: string): string {
 interface ToolCallRequest {
   name: string;
   args: any;
+}
+
+interface DestructiveActionInfo {
+  actionName: string;
+  impact: string;
+}
+
+interface PendingDestructiveAction extends DestructiveActionInfo {
+  id: string;
+  request: ToolCallRequest;
+}
+
+const DESTRUCTIVE_TOOL_NAMES = new Set([
+  "github/delete-repo",
+  "github/delete-branch",
+  "github/delete-file",
+  "supabase/drop-table",
+  "vercel/trigger-deploy",
+]);
+
+const DESTRUCTIVE_SQL_PATTERN = /\b(DROP|DELETE|TRUNCATE|ALTER)\b/gi;
+
+function getArgValue(args: any, keys: string[]): string | undefined {
+  if (!args || typeof args !== "object") return undefined;
+  for (const key of keys) {
+    const value = args[key];
+    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
+  }
+  return undefined;
+}
+
+function getSqlText(args: any): string {
+  if (!args || typeof args !== "object") return "";
+  return String(args.sql || args.query || args.statement || args.command || "");
+}
+
+function getDestructiveActionInfo(request: ToolCallRequest): DestructiveActionInfo | null {
+  const actionName = normalizeToolName(request.name);
+  const args = request.args || {};
+
+  if (actionName === "supabase/execute-sql") {
+    const sql = getSqlText(args);
+    if (!DESTRUCTIVE_SQL_PATTERN.test(sql)) return null;
+    DESTRUCTIVE_SQL_PATTERN.lastIndex = 0;
+    const operations = Array.from(new Set((sql.match(DESTRUCTIVE_SQL_PATTERN) || []).map((op) => op.toUpperCase()))).join(", ") || "operação destrutiva";
+    return {
+      actionName,
+      impact: `O SQL contém ${operations}. Isso pode remover dados, apagar estruturas, truncar tabelas ou alterar schema permanentemente no Supabase. SQL detectado: ${sql.slice(0, 500)}${sql.length > 500 ? "..." : ""}`,
+    };
+  }
+
+  if (!DESTRUCTIVE_TOOL_NAMES.has(actionName)) return null;
+
+  if (actionName === "github/delete-repo") {
+    const repo = getArgValue(args, ["repo", "repository", "name", "repoName"]) || "repositório informado";
+    return { actionName, impact: `O repositório ${repo} será deletado permanentemente, incluindo issues, branches, commits, arquivos e configurações.` };
+  }
+
+  if (actionName === "github/delete-branch") {
+    const repo = getArgValue(args, ["repo", "repository", "repoName"]) || "repositório informado";
+    const branch = getArgValue(args, ["branch", "ref", "name"]) || "branch informada";
+    return { actionName, impact: `A branch ${branch} será deletada permanentemente do repositório ${repo}. Commits não mesclados podem ser perdidos.` };
+  }
+
+  if (actionName === "github/delete-file") {
+    const repo = getArgValue(args, ["repo", "repository", "repoName"]) || "repositório informado";
+    const filePath = getArgValue(args, ["path", "file", "filepath", "filePath"]) || "arquivo informado";
+    return { actionName, impact: `O arquivo ${filePath} será removido do repositório ${repo} por commit. O conteúdo deixará de existir na branch alvo.` };
+  }
+
+  if (actionName === "supabase/drop-table") {
+    const table = getArgValue(args, ["table", "tableName", "name"]) || "tabela informada";
+    const schema = getArgValue(args, ["schema"]) || "public";
+    return { actionName, impact: `A tabela ${schema}.${table} será removida permanentemente do Supabase, incluindo todos os dados, índices, relações e permissões associadas.` };
+  }
+
+  if (actionName === "vercel/trigger-deploy") {
+    const project = getArgValue(args, ["project", "projectId", "projectName", "name"]) || "projeto informado";
+    return { actionName, impact: `Um deploy forçado será disparado para ${project}. Isso pode substituir a versão atual em produção e afetar usuários reais se o build publicado tiver regressões.` };
+  }
+
+  return { actionName, impact: "Esta ação pode causar perda permanente ou alteração sensível de dados/ambiente." };
 }
 
 const TOOL_ALIASES: Record<string, string> = {
@@ -479,6 +574,7 @@ export default function ChatPage() {
   const [isPlannerOpen, setIsPlannerOpen] = useState(false);
   const [plannerSteps, setPlannerSteps] = useState<PlanStep[]>([]);
   const [currentToolName, setCurrentToolName] = useState<string | null>(null);
+  const [pendingDestructiveAction, setPendingDestructiveAction] = useState<PendingDestructiveAction | null>(null);
   const [pendingAction, setPendingAction] = useState<{ plan: string; command: string } | null>(null);
   const [userData, setUserData] = useState<UserData>({ name: "Jadiel" });
   const [authChecked, setAuthChecked] = useState(false);
@@ -490,6 +586,7 @@ export default function ChatPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const destructiveApprovalResolverRef = useRef<((approved: boolean) => void) | null>(null);
 
   const addLog = useCallback((type: LogEntry["type"], message: string) => {
     setLogs((prev) => [{ id: Date.now().toString(), type, message, timestamp: Date.now() }, ...prev].slice(0, 50));
@@ -515,6 +612,31 @@ export default function ChatPage() {
     group: (new Date(s.created_at).toDateString() === new Date().toDateString() ? "Hoje" : "Mais antigos") as any
   }));
 
+  const requestDestructiveApproval = useCallback((info: DestructiveActionInfo, request: ToolCallRequest): Promise<boolean> => {
+    setCurrentToolName(null);
+    setPendingDestructiveAction({
+      id: Math.random().toString(36).substring(7),
+      actionName: info.actionName,
+      impact: info.impact,
+      request,
+    });
+    addLog("info", `Aguardando confirmação visual para ação destrutiva: ${info.actionName}.`);
+
+    return new Promise<boolean>((resolve) => {
+      destructiveApprovalResolverRef.current = resolve;
+    });
+  }, [addLog]);
+
+  const resolveDestructiveApproval = useCallback((approved: boolean) => {
+    const actionName = pendingDestructiveAction?.actionName;
+    destructiveApprovalResolverRef.current?.(approved);
+    destructiveApprovalResolverRef.current = null;
+    setPendingDestructiveAction(null);
+    addLog(approved ? "success" : "info", approved
+      ? `Ação destrutiva confirmada pelo usuário: ${actionName}.`
+      : `Ação destrutiva cancelada pelo usuário: ${actionName}.`);
+  }, [addLog, pendingDestructiveAction]);
+
   // ── Funções de Navegação ──
   const loadConversation = useCallback(async (id: string) => {
     const dbMessages = await loadMessages(id);
@@ -532,6 +654,9 @@ export default function ChatPage() {
     setMessages([]);
     setToolCalls([]);
     setPlannerSteps([]);
+    setPendingDestructiveAction(null);
+    destructiveApprovalResolverRef.current?.(false);
+    destructiveApprovalResolverRef.current = null;
     setAttachedImages([]);
   }, []);
 
@@ -969,6 +1094,47 @@ export default function ChatPage() {
             };
           }
 
+          const destructiveInfo = getDestructiveActionInfo({ ...request, name: normalizedName });
+          if (destructiveInfo) {
+            setPlannerSteps(prev => prev.map(step =>
+              step.id === plannerStepId ? { ...step, title: `Aguardando confirmação: ${normalizedName}`, status: "pending" as const } : step
+            ));
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last?.role === "assistant") {
+                last.content = `${finalContent}
+
+> ⚠️ **Ação destrutiva detectada:** ${destructiveInfo.actionName}. Pausando antes de executar. Confirme ou cancele no card de segurança.`.trim();
+                last.tool_calls = executedToolCalls;
+              }
+              return updated;
+            });
+
+            const approved = await requestDestructiveApproval(destructiveInfo, { ...request, name: normalizedName });
+            if (controller.signal.aborted) throw new DOMException("Execução cancelada", "AbortError");
+            if (!approved) {
+              setPlannerSteps(prev => prev.map(step =>
+                step.id === plannerStepId ? { ...step, status: "failed" as const } : step
+              ));
+              const cancelNotice = `
+
+> ✅ Ação destrutiva **${destructiveInfo.actionName}** cancelada antes da execução. Nenhuma ferramenta destrutiva foi chamada.`;
+              finalContent += cancelNotice;
+              setMessages((prev) => {
+                const updated = [...prev];
+                const last = updated[updated.length - 1];
+                if (last?.role === "assistant") {
+                  last.content = finalContent;
+                  last.tool_calls = executedToolCalls;
+                }
+                return updated;
+              });
+              continueLoop = false;
+              break;
+            }
+          }
+
           setCurrentToolName(normalizedName);
           setPlannerSteps(prev => prev.map(step =>
             step.id === plannerStepId ? { ...step, status: "running" as const } : step
@@ -1000,6 +1166,8 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
             return updated;
           });
         }
+
+        if (!continueLoop) break;
 
         const toolSummary = formatToolResultsForUser(loopExecutedToolCalls);
         if (toolSummary) {
@@ -1060,7 +1228,7 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
       setCurrentToolName(null);
       abortControllerRef.current = null;
     }
-  }, [isLoading, activeModel, messages, currentSessionId, createNewSession, saveChatMessage, addLog, updateToolCall, attachedImages, webSearchEnabled]);
+  }, [isLoading, activeModel, messages, currentSessionId, createNewSession, saveChatMessage, addLog, updateToolCall, requestDestructiveApproval, attachedImages, webSearchEnabled]);
 
   const handleImageUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
@@ -1089,6 +1257,9 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
   }, [addLog]);
 
   const handleCancelAgentLoop = useCallback(() => {
+    destructiveApprovalResolverRef.current?.(false);
+    destructiveApprovalResolverRef.current = null;
+    setPendingDestructiveAction(null);
     abortControllerRef.current?.abort();
     setCurrentToolName(null);
     addLog("info", "Cancelamento solicitado pelo usuário.");
@@ -1217,6 +1388,50 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
                   </a>{" "}
                   e bota a chave lá.
                 </p>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Gate de Segurança - Ações Destrutivas */}
+        <AnimatePresence>
+          {pendingDestructiveAction && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden border-b border-red-500/40 bg-red-500/10"
+            >
+              <div className="mx-auto flex max-w-4xl flex-col gap-4 p-4 md:flex-row md:items-center">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-red-500/40 bg-black/50 text-red-300 shadow-[0_0_22px_rgba(239,68,68,0.25)]">
+                  <ShieldAlert size={22} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-[0.22em] text-red-300">
+                    <AlertTriangle size={14} />
+                    <span>⚠️ AÇÃO DESTRUTIVA</span>
+                  </div>
+                  <p className="text-sm font-bold text-white">
+                    A Zarith quer executar: <span className="font-mono text-red-200">{pendingDestructiveAction.actionName}</span>
+                  </p>
+                  <p className="mt-2 text-xs leading-relaxed text-white/75">
+                    <span className="font-bold text-red-200">Impacto:</span> {pendingDestructiveAction.impact}
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    onClick={() => resolveDestructiveApproval(false)}
+                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-white/80 transition-all hover:bg-white/10"
+                  >
+                    CANCELAR
+                  </button>
+                  <button
+                    onClick={() => resolveDestructiveApproval(true)}
+                    className="rounded-xl border border-red-400/50 bg-red-500 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-white shadow-[0_0_20px_rgba(239,68,68,0.35)] transition-all hover:bg-red-400"
+                  >
+                    CONFIRMAR
+                  </button>
+                </div>
               </div>
             </motion.div>
           )}
