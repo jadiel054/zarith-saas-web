@@ -26,6 +26,7 @@ import { useChatPersistence } from "@/hooks/useChatPersistence";
 import { ExecutionLogs, LogEntry } from "@/components/execution-logs";
 import { AgentPlannerPanel, PlanStep } from "@/components/agent-planner-panel";
 import { ToolCallStream, ToolCall } from "@/components/tool-call-stream";
+import { formatGitHubReposForModel } from "@/services/tools/formatForModel";
 import { deployService } from "@/services/execution/deploy";
 import { githubService } from "@/services/execution/github";
 import { supabaseAdminService } from "@/services/execution/supabaseAdmin";
@@ -421,7 +422,7 @@ export default function ChatPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addLog = useCallback((type: LogEntry["type"], message: string) => {
-    setLogs((prev) => [{ id: Date.now().toString(), type, message, timestamp: new Date().toLocaleTimeString() }, ...prev].slice(0, 50));
+    setLogs((prev) => [{ id: Date.now().toString(), type, message, timestamp: Date.now() }, ...prev].slice(0, 50));
   }, []);
 
   const updateToolCall = useCallback((toolCall: ToolCall) => {
@@ -816,68 +817,42 @@ export default function ChatPage() {
           ));
         }
 
-        // O resultado já vem pré-processado do executeToolCall
-        const simplifiedToolResults = executedToolCalls.map(call => {
-          if (call.status === "error") return `Erro em ${call.name}: ${call.result?.error || 'Erro desconhecido'}`;
-          
-          const res = call.result;
-          if (call.name === "github/list-repos" && Array.isArray(res)) {
-            const repos = res.slice(0, 20);
-            const formatted = repos.map((r: any) => 
-              `- **${r.name}** | ${r.language || 'N/A'} | ${r.private ? '🔒 privado' : '🌐 público'} | [ver](${r.html_url})`
-            ).join('\n');
-            return `Aqui estão seus repositórios:\n\n${formatted}`;
-          }
-          if (call.name === "github/read-file") {
-            return `Conteúdo de ${call.args?.path}:\n${res.content || res}`;
-          }
-          return `${call.name} executado com sucesso.`;
-        }).join("\n\n---\n\n");
-
         const toolSummary = `
 
 ---
 **Resultados das ferramentas executadas:**
-Aqui estão os dados que eu trouxe pra você, Jadiel. Nada de JSON cru, bora pro que interessa:
 
 ${executedToolCalls.map(call => {
-  if (call.status === "error") return `❌ **Erro em ${call.name}**: ${call.result?.error || 'Erro desconhecido'}`;
-  
-  const res = call.result;
-  if (call.name === "github/list-repos" && Array.isArray(res)) {
-    return `### 📂 Repositórios Encontrados\n\n${res.map((r: any) => `
-<div style="margin-bottom: 8px; border: 1px solid rgba(0, 245, 255, 0.2); border-radius: 12px; overflow: hidden; background: rgba(0, 0, 0, 0.2);">
-  <details>
-    <summary style="padding: 12px; cursor: pointer; list-style: none; font-weight: bold; display: flex; align-items: center; gap: 8px; background: rgba(255, 255, 255, 0.02);">
-      <span style="color: #00f5ff;">▶</span> ${r.name} 
-      <span style="font-size: 10px; opacity: 0.5; text-transform: uppercase; margin-left: 8px;">(${r.language} • ${r.visibility})</span>
-    </summary>
-    <div style="padding: 12px; border-top: 1px solid rgba(255, 255, 255, 0.05); font-size: 12px; line-height: 1.6;">
-      <p style="color: rgba(255, 255, 255, 0.7); margin-bottom: 8px;">${r.description}</p>
-      <div style="display: flex; gap: 16px; align-items: center;">
-        <a href="${r.url}" target="_blank" style="color: #00f5ff; text-decoration: none; font-weight: bold;">Ver no GitHub</a>
-        <span style="color: rgba(255, 255, 255, 0.3); font-size: 10px;">Atualizado em: ${new Date(r.updated_at).toLocaleDateString()}</span>
-      </div>
-    </div>
-  </details>
-</div>`).join("")}`;
-  }
-  
-  if (call.name === "github/read-file") {
-    return `### 📄 Arquivo: ${call.args?.path}\n\`\`\`${call.args?.path?.split('.').pop() || ''}\n${res.content || res}\n\`\`\``;
+  if (call.status === "error") {
+    const errorResult = call.result as { error?: string; message?: string } | undefined;
+    return `Falha em **${call.name}**: ${errorResult?.error || errorResult?.message || 'erro desconhecido'}.`;
   }
 
-  if (call.name === "vercel/list-projects" && Array.isArray(res?.projects)) {
-    const table = "| **Projeto** | Framework | Último Deploy | Link |\n| :--- | :--- | :--- | :--- |\n" + 
-      res.projects.slice(0, 10).map((p: any) => `| **${p.name}** | ${p.framework || 'N/A'} | ${new Date(p.updatedAt).toLocaleDateString()} | [Link](https://${p.link})`).join("\n");
-    return `### 🚀 Projetos na Vercel\n${table}`;
+  if (call.name === "github/list-repos") {
+    return `${formatGitHubReposForModel(call.result)}\n\n> Renderizei os repositórios em cards expansíveis logo abaixo para você navegar sem JSON cru.`;
   }
 
-  if (call.name === "supabase/list-tables" && Array.isArray(res)) {
-    return `### 🗄️ Tabelas no Supabase\n${res.map((t: any) => `- **${t.table_name}** (${t.table_schema})`).join("\n")}`;
+  if (call.name === "github/get-file") {
+    const res = call.result as any;
+    const args = call.args as { path?: string } | undefined;
+    return `Arquivo **${args?.path || "solicitado"}** lido com sucesso.\n\n\`\`\`${args?.path?.split('.').pop() || ''}\n${res?.content || res || ""}\n\`\`\``;
   }
 
-  return `✅ **${call.name} executado:**\n\`\`\`json\n${JSON.stringify(res, null, 2)}\n\`\`\``;
+  if (call.name === "vercel/list-projects") {
+    const res = call.result as any;
+    if (Array.isArray(res?.projects)) {
+      const table = "| Projeto | Framework | Último deploy | Link |\n| :--- | :--- | :--- | :--- |\n" +
+        res.projects.slice(0, 10).map((p: any) => `| **${p.name}** | ${p.framework || 'N/A'} | ${p.updatedAt ? new Date(p.updatedAt).toLocaleDateString() : 'N/A'} | ${p.link ? `[Abrir](https://${p.link})` : 'N/A'} |`).join("\n");
+      return `Projetos na Vercel:\n\n${table}`;
+    }
+  }
+
+  if (call.name === "supabase/list-tables") {
+    const res = call.result as any;
+    if (Array.isArray(res)) return `Tabelas no Supabase:\n\n${res.map((t: any) => `- **${t.table_name}** (${t.table_schema})`).join("\n")}`;
+  }
+
+  return `**${call.name}** executado com sucesso. Os detalhes técnicos ficam recolhidos no cartão da ferramenta.`;
 }).join("\n\n")}
 `;
         finalContent += toolSummary;
@@ -1159,7 +1134,7 @@ ${executedToolCalls.map(call => {
                   <button
                     onClick={async () => {
                       addLog('info', `Executando comando: ${pendingAction.command}`);
-                      const result = await deployService.executeCommand(pendingAction.command);
+                      const result = await (deployService as any).executeCommand(pendingAction.command);
                       if (result.success) {
                         addLog('success', 'Comando executado com sucesso');
                       } else {
@@ -1194,7 +1169,7 @@ ${executedToolCalls.map(call => {
               <p className="text-sm md:text-base text-[var(--text-secondary)] max-w-md mb-8 md:mb-12 font-medium px-4">
                 Eu sou a Zarith. Sou rápida, ácida e resolvo seu código sem frescura. Manda a braba.
               </p>
-              <ActionCards onAction={handleQuickAction} />
+              <ActionCards userName={userData?.name || "Jadiel"} onAction={handleQuickAction} />
             </div>
           ) : (
             <div className="flex flex-col min-h-full">
@@ -1296,7 +1271,6 @@ ${executedToolCalls.map(call => {
                 <AgentPlannerPanel 
                   steps={plannerSteps} 
                   isOpen={isPlannerOpen} 
-                  onClose={() => setIsPlannerOpen(false)} 
                 />
               )}
             </AnimatePresence>
@@ -1382,6 +1356,7 @@ ${executedToolCalls.map(call => {
         <AnimatePresence>
           {isLogsOpen && (
             <ExecutionLogs 
+              isOpen={isLogsOpen}
               logs={logs} 
               onClose={() => setIsLogsOpen(false)} 
             />

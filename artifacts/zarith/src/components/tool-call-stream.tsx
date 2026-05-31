@@ -1,13 +1,9 @@
 import { motion } from "framer-motion";
-import { Terminal as TerminalIcon, ChevronRight, CheckCircle2, XCircle } from "lucide-react";
+import { Terminal as TerminalIcon, CheckCircle2, XCircle } from "lucide-react";
+import { ToolResultRenderer } from "@/components/tool-results/ToolResultRenderer";
+import type { AppToolCall } from "@/types/tools";
 
-export interface ToolCall {
-  id: string;
-  name: string;
-  args: any;
-  status: "calling" | "success" | "error";
-  result?: any;
-}
+export type ToolCall = AppToolCall;
 
 interface ToolCallStreamProps {
   calls: ToolCall[];
@@ -83,17 +79,7 @@ export function ToolCallStream({ calls }: ToolCallStreamProps) {
             {JSON.stringify(call.args, null, 2)}
           </div>
 
-          {call.result && (
-            <div className="border-t border-cyan-500/10 pt-2 mt-1">
-              <div className="flex items-center gap-1 mb-1">
-                <ChevronRight size={10} className="text-gray-500" />
-                <span className="text-[10px] text-gray-500 uppercase">Resultado:</span>
-              </div>
-              <pre className="text-[10px] text-gray-300 max-h-32 overflow-y-auto custom-scrollbar whitespace-pre-wrap">
-                {typeof call.result === "string" ? call.result : JSON.stringify(call.result, null, 2)}
-              </pre>
-            </div>
-          )}
+          {(call.result || call.status === "calling" || call.status === "error") && <ToolResultRenderer call={call} />}
         </motion.div>
       ))}
     </div>
