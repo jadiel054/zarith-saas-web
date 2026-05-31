@@ -330,176 +330,102 @@ function parseToolCallsFromText(text: string): ToolCallRequest[] {
           if (name) calls.push({ name, args: item.args || item.params || item.arguments || item.payload || {} });
         }
       } catch (error) {
-        console.error("Erro ao parsear tool call:", error, match[1]);
+        console.error("Erro ao parsear tool call:", error);
       }
     }
   }
-
-  const seen = new Set<string>();
-  return calls.filter((call) => {
-    const key = `${call.name}:${JSON.stringify(call.args)}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function getToolCredentials(namespace: string) {
-  const credentials: Record<string, string> = {};
-  if (namespace === "github") {
-    const token = localStorage.getItem("zarith_apikey_GitHub Token") || localStorage.getItem("zarith_apikey_GitHub") || localStorage.getItem("zarith_github_token");
-    if (token) credentials.token = token;
-  }
-  if (namespace === "vercel") {
-    const token = localStorage.getItem("zarith_apikey_Vercel Token") || localStorage.getItem("zarith_apikey_Vercel") || localStorage.getItem("zarith_vercel_token");
-    if (token) credentials.token = token;
-  }
-  if (namespace === "supabase") {
-    const url = localStorage.getItem("zarith_apikey_Supabase URL") || localStorage.getItem("zarith_supabase_url");
-    const serviceRoleKey = localStorage.getItem("zarith_apikey_Supabase Service Role") || localStorage.getItem("zarith_supabase_service_role");
-    if (url) credentials.url = url;
-    if (serviceRoleKey) credentials.serviceRoleKey = serviceRoleKey;
-  }
-  if (namespace === "web") {
-    const token = localStorage.getItem("zarith_apikey_Tavily") || localStorage.getItem("zarith_tavily_key");
-    if (token) credentials.apiKey = token;
-  }
-  if (namespace === "vision") {
-    const token = localStorage.getItem("zarith_apikey_Gemini") || localStorage.getItem("zarith_gemini_key");
-    if (token) credentials.apiKey = token;
-  }
-  return credentials;
+  return calls;
 }
 
 async function executeToolCall(
-  toolCall: ToolCallRequest,
-  addLog: (type: LogEntry['type'], message: string) => void,
-  onToolCallUpdate: (toolCall: ToolCall) => void
+  request: ToolCallRequest,
+  addLog: (type: LogEntry["type"], msg: string) => void,
+  updateToolCall: (tc: ToolCall) => void
 ): Promise<ToolCall> {
-  const callId = Math.random().toString(36).substring(7);
-  const normalizedName = normalizeToolName(toolCall.name);
-  const toolCallState: ToolCall = {
-    id: callId,
-    name: normalizedName,
-    args: toolCall.args,
-    status: "calling"
-  };
+  const id = Math.random().toString(36).substring(7);
+  const toolCall: ToolCall = { id, name: request.name, args: request.args, status: "calling" };
+  updateToolCall(toolCall);
+  addLog("info", `Chamando ${request.name}...`);
 
   try {
-    addLog('info', `Executando ferramenta: ${normalizedName}`);
-    onToolCallUpdate(toolCallState);
+    let result: any;
+    const API_URL = "https://zarith-api-server.onrender.com";
 
-    const [namespace, ...actionParts] = normalizedName.split('/');
-    const action = actionParts.join('/');
-    const apiBase = "https://zarith-api-server.onrender.com";
-    const endpoint = namespace === "deploy" ? "/api/deploy" : `/api/${namespace}/${action}`;
-    const payload = { ...getToolCredentials(namespace), ...(toolCall.args || {}) };
-
-    // Garantir que o método seja SEMPRE POST para evitar HTTP 405
-    const response = await fetch(`${apiBase}${endpoint}`, {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
-
-    const result = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-
-    if (!response.ok || result?.success === false) {
-      throw new Error(JSON.stringify(result));
+    if (request.name.startsWith("github/")) {
+      const endpoint = request.name.split("/")[1];
+      const res = await fetch(`${API_URL}/api/github/${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request.args),
+      });
+      result = await res.json();
+    } else if (request.name.startsWith("supabase/")) {
+      const endpoint = request.name.split("/")[1];
+      const res = await fetch(`${API_URL}/api/supabase/${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request.args),
+      });
+      result = await res.json();
+    } else if (request.name.startsWith("vercel/")) {
+      const endpoint = request.name.split("/")[1];
+      const res = await fetch(`${API_URL}/api/vercel/${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request.args),
+      });
+      result = await res.json();
+    } else {
+      throw new Error(`Tool desconhecida: ${request.name}`);
     }
 
-    // Pré-processamento REAL dos dados antes de salvar no estado
-    let finalResult = result;
-    if (normalizedName === "github/list-repos" && Array.isArray(result)) {
-      finalResult = result.map((repo: any) => ({
-        name: repo.name,
-        description: repo.description || "Sem descrição",
-        language: repo.language || "N/A",
-        visibility: repo.private ? "privado" : "público",
-        url: repo.html_url,
-        updated_at: repo.updated_at
-      }));
-      addLog('info', `Filtrados ${result.length} repositórios para o contexto da IA.`);
-    }
-
-    toolCallState.status = "success";
-    toolCallState.result = finalResult;
-    onToolCallUpdate(toolCallState);
-    addLog('success', `Ferramenta ${normalizedName} executada com sucesso`);
-
-    return toolCallState;
+    const finalCall = { ...toolCall, status: "success" as const, result };
+    updateToolCall(finalCall);
+    addLog("success", `${request.name} executada com sucesso.`);
+    return finalCall;
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    toolCallState.status = "error";
-    toolCallState.result = { error: errorMsg };
-    onToolCallUpdate(toolCallState);
-    addLog('error', `Falha ao executar ${normalizedName}: ${errorMsg}`);
-    console.error(`[AUDIT] Tool execution failed: ${normalizedName}`, { args: toolCall.args, error: errorMsg });
-
-    return toolCallState;
+    const finalCall = { ...toolCall, status: "error" as const, result: { error: errorMsg } };
+    updateToolCall(finalCall);
+    addLog("error", `Erro em ${request.name}: ${errorMsg}`);
+    return finalCall;
   }
 }
 
-// ── Componente principal ──────────────────────────────────────────────────────
+// ── Componente Principal ──────────────────────────────────────────────────────
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  // Estados
   const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [activeModel, setActiveModel] = useState<ModelDef>(MODELS[0]);
+  const [activeModel, setActiveModel] = useState(MODELS[0]);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
-  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [userData, setUserData] = useState<UserData>({ name: "Jadiel" });
-  const [authChecked, setAuthChecked] = useState(false);
-  const [attachedImages, setAttachedImages] = useState<ChatAttachment[]>([]);
-
-  // Estados de Execução e Logs
   const [isLogsOpen, setIsLogsOpen] = useState(false);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [attachedImages, setAttachedImages] = useState<ChatAttachment[]>([]);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-
-  // Garantir que logs seja sempre um array (Safety)
-  const safeLogs = useMemo(() => Array.isArray(logs) ? logs : [], [logs]);
-  const [pendingAction, setPendingAction] = useState<{
-    type: 'deploy' | 'github' | 'supabase' | 'template';
-    plan: string;
-    command: string;
-    payload?: any;
-  } | null>(null);
-
-  // Estados para Planejador e Tool Stream
-  const [plannerSteps, setPlannerSteps] = useState<PlanStep[]>([]);
   const [toolCalls, setToolCalls] = useState<ToolCall[]>([]);
   const [isPlannerOpen, setIsPlannerOpen] = useState(false);
-
-  // Hook de persistência do Supabase
-  const { 
-    sessions, 
-    loadMessages, 
-    createNewSession, 
-    saveChatMessage, 
-    deleteSession 
-  } = useChatPersistence();
+  const [plannerSteps, setPlannerSteps] = useState<PlanStep[]>([]);
+  const [pendingAction, setPendingAction] = useState<{ plan: string; command: string } | null>(null);
+  const [userData, setUserData] = useState<UserData>({ name: "Jadiel" });
+  const [authChecked, setAuthChecked] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+
+  const { sessions, createNewSession, saveChatMessage, loadMessages, deleteSession } = useChatPersistence();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const addLog = useCallback((type: LogEntry['type'], message: string) => {
-    setLogs(prev => [...prev, {
-      id: Math.random().toString(36).substring(7),
-      timestamp: Date.now(),
-      type,
-      message
-    }]);
+  const addLog = useCallback((type: LogEntry["type"], message: string) => {
+    setLogs((prev) => [{ id: Date.now().toString(), type, message, timestamp: new Date().toLocaleTimeString() }, ...prev].slice(0, 50));
   }, []);
 
   const updateToolCall = useCallback((toolCall: ToolCall) => {
-    setToolCalls(prev => {
+    setToolCalls((prev) => {
       const existing = prev.findIndex(tc => tc.id === toolCall.id);
       if (existing >= 0) {
         const updated = [...prev];
@@ -699,7 +625,6 @@ export default function ChatPage() {
             return data.choices[0]?.message?.content ?? "Sem resposta.";
 
           } else if (modelId === "gemini" && geminiKey) {
-            const systemMessages = [{ role: "system", content: ZARITH_SYSTEM_PROMPT }];
             const chatMessages = [...history.filter(m => m.role !== "system"), { role: "user", content: userContent }];
             
             const res = await fetch(
@@ -1233,39 +1158,18 @@ ${executedToolCalls.map(call => {
                   </button>
                   <button
                     onClick={async () => {
-                      const action = pendingAction;
-                      setPendingAction(null);
-                      setIsLogsOpen(true);
-                      addLog('info', `Ação autorizada: ${action.type.toUpperCase()}`);
-                      
-                      try {
-                        addLog('command', action.command);
-                        
-                        if (action.type === 'deploy') {
-                          const result = await deployService.createDeployment(action.payload.files, "zarith-project");
-                          addLog('success', `Deploy iniciado: ${result.id}`);
-                          if (result.url) addLog('success', `Link funcional: https://${result.url}`);
-                        } 
-                        else if (action.type === 'github') {
-                          const result = await githubService.createRepository(action.payload.name);
-                          addLog('success', `Repositório criado: ${result.html_url}`);
-                        }
-                        else if (action.type === 'supabase') {
-                          await supabaseAdminService.executeSQL(action.payload.sql);
-                          addLog('success', `SQL executado com sucesso no Supabase.`);
-                        }
-                        else if (action.type === 'template') {
-                          addLog('info', `Aplicando template: ${action.payload.name}`);
-                          addLog('success', `Template ${action.payload.name} injetado no projeto.`);
-                        }
-                      } catch (e: any) {
-                        addLog('error', e.message);
+                      addLog('info', `Executando comando: ${pendingAction.command}`);
+                      const result = await deployService.executeCommand(pendingAction.command);
+                      if (result.success) {
+                        addLog('success', 'Comando executado com sucesso');
+                      } else {
+                        addLog('error', `Falha no comando: ${result.error}`);
                       }
+                      setPendingAction(null);
                     }}
-                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] text-black text-xs font-black flex items-center gap-2 hover:brightness-110 transition-all"
+                    className="px-4 py-2 rounded-xl bg-[#bf00ff] hover:bg-[#a600e6] text-xs font-bold transition-all shadow-[0_0_15px_rgba(191,0,255,0.4)]"
                   >
-                    <Play size={14} />
-                    EXECUTAR
+                    Executar Agora
                   </button>
                 </div>
               </div>
@@ -1273,161 +1177,218 @@ ${executedToolCalls.map(call => {
           )}
         </AnimatePresence>
 
-        {/* Messages area */}
-        <div className="flex-1 overflow-y-auto min-h-0">
+        {/* Chat area */}
+        <main className="flex-1 overflow-y-auto scrollbar-hide relative">
           {messages.length === 0 ? (
-            <div className="h-full overflow-y-auto">
-              <ActionCards
-                userName={userData.name.split(" ")[0]}
-                onAction={handleQuickAction}
-              />
+            <div className="h-full flex flex-col items-center justify-center p-4 md:p-8 text-center">
+              <motion.div
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                className="w-20 h-20 md:w-24 md:h-24 rounded-3xl bg-gradient-to-br from-[#00f5ff] to-[#bf00ff] flex items-center justify-center text-black mb-6 md:mb-8 shadow-[0_0_50px_rgba(0,245,255,0.3)]"
+              >
+                <Zap size={40} className="md:size-48" fill="currentColor" />
+              </motion.div>
+              <h1 className="text-2xl md:text-4xl font-black mb-3 md:mb-4 tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-white to-white/50">
+                O que vamos codar hoje, Jadiel?
+              </h1>
+              <p className="text-sm md:text-base text-[var(--text-secondary)] max-w-md mb-8 md:mb-12 font-medium px-4">
+                Eu sou a Zarith. Sou rápida, ácida e resolvo seu código sem frescura. Manda a braba.
+              </p>
+              <ActionCards onAction={handleQuickAction} />
             </div>
           ) : (
-            <div className="p-4 md:p-6 space-y-5 max-w-4xl mx-auto w-full">
-              <AnimatePresence>
-                {messages.map((message) => (
-                  <motion.div
-                    key={message.id}
-                    initial={{ opacity: 0, y: 16 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className={`flex gap-3 md:gap-4 ${message.role === "user" ? "justify-end" : "justify-start"}`}
-                  >
-                    <div className={`flex gap-3 md:gap-4 w-full max-w-2xl ${message.role === "user" ? "flex-row-reverse" : ""} group`}
-                      {message.role === "assistant" && (
-                        <div className="w-7 h-7 md:w-8 md:h-8 rounded-full bg-gradient-to-br from-[#00f5ff] to-[#bf00ff] flex items-center justify-center text-black font-bold text-xs shrink-0">
-                          Z
-                        </div>
-                      )}
-                      <div className={`flex flex-col gap-2 flex-1 ${message.role === "user" ? "items-end" : ""}`}
-                        <div
-                          className={`px-4 py-3 rounded-2xl text-sm leading-relaxed max-w-full overflow-x-auto ${
-                            message.role === "user"
-                              ? "bg-[#00f5ff]/20 border border-[#00f5ff]/30 text-white"
-                              : message.isError
-                              ? "bg-red-500/10 border border-red-500/30 text-red-200"
-                              : "bg-[var(--bg-card)] border border-[var(--border-glow)] text-[var(--text-primary)]"
-                          }`}
-                        >
-                          <div className="flex items-start gap-2">
-                            <div className="prose prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10 flex-1">
-                              <ReactMarkdown 
-                                remarkPlugins={[remarkGfm]} 
-                                rehypePlugins={[rehypeRaw]}
-                              >
-                                {message.content}
-                              </ReactMarkdown>
-                            </div>
-                            <button
-                              onClick={() => handleDeleteMessage(message.id)}
-                              className="text-red-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-1 -mr-2"
-                              title="Apagar mensagem"
-                            >
-                              <X size={16} />
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Tool Call Stream */}
-                        {message.tool_calls && message.tool_calls.length > 0 && (
-                          <ToolCallStream calls={message.tool_calls} />
-                        )}
-
+            <div className="flex flex-col min-h-full">
+              {/* Messages list */}
+              <div className="p-4 md:p-6 space-y-5 max-w-4xl mx-auto w-full">
+                <AnimatePresence>
+                  {messages.map((message) => (
+                    <motion.div
+                      key={message.id}
+                      initial={{ opacity: 0, y: 16 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`flex gap-3 md:gap-4 ${message.role === "user" ? "justify-end" : "justify-start"}`}
+                    >
+                      <div className={`flex gap-3 md:gap-4 w-full max-w-2xl ${message.role === "user" ? "flex-row-reverse" : ""} group`}>
                         {message.role === "assistant" && (
-                          <div className="flex gap-2 mt-1">
-                            <button
-                              onClick={() => handleCopy(message.id, message.content)}
-                              className="p-1.5 rounded hover:bg-white/5 transition-all"
-                              title="Copiar"
-                            >
-                              {copiedId === message.id ? (
-                                <Check size={14} className="text-green-400" />
-                              ) : (
-                                <Copy size={14} className="text-gray-400 hover:text-gray-300" />
-                              )}
-                            </button>
-                            <button
-                              onClick={() => handleRetry(message.id)}
-                              className="p-1.5 rounded hover:bg-white/5 transition-all"
-                              title="Tentar novamente"
-                            >
-                              <RotateCcw size={14} className="text-gray-400 hover:text-gray-300" />
-                            </button>
+                          <div className="w-7 h-7 md:w-8 md:h-8 rounded-full bg-gradient-to-br from-[#00f5ff] to-[#bf00ff] flex items-center justify-center text-black font-bold text-xs shrink-0">
+                            Z
                           </div>
                         )}
+                        <div className={`flex flex-col gap-2 flex-1 ${message.role === "user" ? "items-end" : ""}`}>
+                          <div
+                            className={`px-4 py-3 rounded-2xl text-sm leading-relaxed max-w-full overflow-x-auto ${
+                              message.role === "user"
+                                ? "bg-[#00f5ff]/20 border border-[#00f5ff]/30 text-white"
+                                : message.isError
+                                ? "bg-red-500/10 border border-red-500/30 text-red-200"
+                                : "bg-[var(--bg-card)] border border-[var(--border-glow)] text-[var(--text-primary)]"
+                            }`}
+                          >
+                            <div className="flex items-start gap-2">
+                              <div className="prose prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10 flex-1">
+                                <ReactMarkdown 
+                                  remarkPlugins={[remarkGfm]} 
+                                  rehypePlugins={[rehypeRaw]}
+                                >
+                                  {message.content}
+                                </ReactMarkdown>
+                              </div>
+                              <button
+                                onClick={() => handleDeleteMessage(message.id)}
+                                className="text-red-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-1 -mr-2"
+                                title="Apagar mensagem"
+                              >
+                                <X size={16} />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Tool Call Stream */}
+                          {message.tool_calls && message.tool_calls.length > 0 && (
+                            <div className="w-full max-w-md">
+                              <ToolCallStream calls={message.tool_calls} />
+                            </div>
+                          )}
+
+                          <div className="flex items-center gap-3 px-1">
+                            {message.role === "assistant" && (
+                              <span className="text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest">
+                                {message.model || activeModel.name}
+                              </span>
+                            )}
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                onClick={() => handleCopy(message.id, message.content)}
+                                className="p-1 hover:bg-white/5 rounded text-[var(--text-secondary)] transition-colors"
+                                title="Copiar"
+                              >
+                                {copiedId === message.id ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
+                              </button>
+                              {message.role === "assistant" && (
+                                <button
+                                  onClick={() => handleRetry(message.id)}
+                                  className="p-1 hover:bg-white/5 rounded text-[var(--text-secondary)] transition-colors"
+                                  title="Regerar"
+                                >
+                                  <RotateCcw size={12} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-              <div ref={messagesEndRef} />
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+                <div ref={messagesEndRef} className="h-4" />
+              </div>
             </div>
           )}
-        </div>
+        </main>
 
         {/* Input area */}
-        <div className="border-t border-[var(--border-glow)] bg-[var(--bg-secondary)] p-4 shrink-0">
-          <div className="max-w-4xl mx-auto space-y-3">
-            {attachedImages.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {attachedImages.map((img) => (
-                  <div key={img.id} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#00f5ff]/10 border border-[#00f5ff]/25 text-xs text-[#00f5ff]">
-                    <ImageIcon size={14} />
-                    <span className="max-w-[180px] truncate">{img.name}</span>
-                    <button
-                      onClick={() => setAttachedImages(prev => prev.filter(item => item.id !== img.id))}
-                      className="p-0.5 rounded hover:bg-white/10"
-                      title="Remover imagem"
-                    >
-                      <X size={12} />
-                    </button>
-                  </div>
-                ))}
+        <footer className="p-4 md:p-6 bg-gradient-to-t from-[var(--bg-primary)] to-transparent shrink-0">
+          <div className="max-w-4xl mx-auto relative">
+            
+            {/* Planner Panel Toggle */}
+            <AnimatePresence>
+              {isPlannerOpen && (
+                <AgentPlannerPanel 
+                  steps={plannerSteps} 
+                  isOpen={isPlannerOpen} 
+                  onClose={() => setIsPlannerOpen(false)} 
+                />
+              )}
+            </AnimatePresence>
+
+            {/* Floating Attachments */}
+            <AnimatePresence>
+              {attachedImages.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  className="absolute bottom-full left-0 mb-4 flex gap-2 p-2 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl shadow-2xl z-20"
+                >
+                  {attachedImages.map((img) => (
+                    <div key={img.id} className="relative group w-16 h-16 md:w-20 md:h-20">
+                      <img src={img.dataUrl} alt="upload" className="w-full h-full object-cover rounded-xl border border-white/10" />
+                      <button
+                        onClick={() => setAttachedImages(prev => prev.filter(i => i.id !== img.id))}
+                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div className="relative group">
+              <div className="absolute -inset-0.5 bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] rounded-[24px] blur opacity-20 group-focus-within:opacity-40 transition duration-500" />
+              <div className="relative bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-[22px] shadow-2xl overflow-hidden transition-all group-focus-within:border-[#00f5ff]/50">
+                <textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Manda a parada, Jadiel... pode anexar print, erro ou wireframe."
+                  className="w-full bg-transparent border-none focus:ring-0 text-sm md:text-base p-4 md:p-5 pr-24 md:pr-32 resize-none min-h-[56px] md:min-h-[64px] max-h-32 scrollbar-hide text-white placeholder-white/30 font-medium"
+                />
+                
+                <div className="absolute right-2 md:right-3 bottom-2 md:bottom-3 flex items-center gap-1 md:gap-2">
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleImageUpload}
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-2 md:p-2.5 text-[var(--text-secondary)] hover:text-[#00f5ff] hover:bg-white/5 rounded-xl transition-all"
+                    title="Anexar imagem"
+                  >
+                    <ImageIcon size={18} className="md:size-20" />
+                  </button>
+                  <button
+                    onClick={handleSendMessage}
+                    disabled={isLoading || (!input.trim() && attachedImages.length === 0)}
+                    className={`p-2 md:p-2.5 rounded-xl transition-all shadow-lg flex items-center justify-center ${
+                      isLoading || (!input.trim() && attachedImages.length === 0)
+                        ? "bg-white/5 text-white/20 cursor-not-allowed"
+                        : "bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] text-black hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(0,245,255,0.3)]"
+                    }`}
+                  >
+                    {isLoading ? (
+                      <div className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Send size={18} className="md:size-20" fill="currentColor" />
+                    )}
+                  </button>
+                </div>
               </div>
-            )}
-            <div className="flex gap-3">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={handleImageUpload}
-              />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isLoading}
-                title="Anexar imagem para análise visual"
-                className="px-3 py-3 border border-[var(--border-glow)] rounded-2xl text-[var(--text-secondary)] hover:text-[#00f5ff] hover:border-[#00f5ff] disabled:opacity-50 transition-all"
-              >
-                <ImageIcon size={16} />
-              </button>
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Manda a parada, Jadiel... pode anexar print, erro ou wireframe."
-                className="flex-1 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl px-4 py-3 text-sm text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:outline-none focus:border-[#00f5ff] focus:ring-1 focus:ring-[#00f5ff]/30 resize-none"
-                rows={1}
-              />
-              <button
-                onClick={handleSendMessage}
-                disabled={isLoading || (!input.trim() && attachedImages.length === 0)}
-                className="px-4 py-3 bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] text-black rounded-2xl font-bold text-sm hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
-              >
-                <Send size={16} />
-                <span className="hidden sm:inline">Enviar</span>
-              </button>
             </div>
+            
+            <p className="mt-3 text-[10px] md:text-xs text-center text-[var(--text-secondary)] font-medium opacity-50 px-4">
+              Zarith v2.5 • Criada por <span className="text-[#00f5ff]">jadiel054</span> • Powered by Groq & Gemini
+            </p>
           </div>
-        </div>
+        </footer>
+
+        {/* Logs Panel */}
+        <AnimatePresence>
+          {isLogsOpen && (
+            <ExecutionLogs 
+              logs={logs} 
+              onClose={() => setIsLogsOpen(false)} 
+            />
+          )}
+        </AnimatePresence>
+
       </div>
-
-      {/* Planner Panel */}
-      <AgentPlannerPanel steps={plannerSteps} isOpen={isPlannerOpen} />
-
-      {/* Execution Logs */}
-      <ExecutionLogs logs={safeLogs} isOpen={isLogsOpen} onClose={() => setIsLogsOpen(false)} />
     </div>
   );
 }
