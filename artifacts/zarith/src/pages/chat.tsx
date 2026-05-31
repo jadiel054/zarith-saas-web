@@ -386,6 +386,51 @@ function getDestructiveActionInfo(request: ToolCallRequest): DestructiveActionIn
   return { actionName, impact: "Esta ação pode causar perda permanente ou alteração sensível de dados/ambiente." };
 }
 
+function detectPreflightDestructiveActionFromText(text: string): ToolCallRequest | null {
+  const original = String(text || "");
+  const normalized = original
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  const hasDeleteIntent = /\b(delete|deletar|deleta|remover|remove|apagar|apaga|excluir|exclui)\b/.test(normalized);
+  if (!hasDeleteIntent) return null;
+
+  const repoMatch = original.match(/(?:reposit[oó]rio|repo)\s+([A-Za-z0-9_.-]+)/i);
+  const repo = repoMatch?.[1]?.replace(/[.,;:!?]+$/, "");
+
+  const explicitOwnerMatch = original.match(/(?:usu[aá]rio|owner|dono)\s+([A-Za-z0-9_.-]+)/i);
+  const user = explicitOwnerMatch?.[1]?.replace(/[.,;:!?]+$/, "") || "jadiel054";
+
+  const fileMatch = original.match(/arquivo\s+([A-Za-z0-9_./\-]+(?:\.[A-Za-z0-9]+)?)/i);
+  if (repo && fileMatch) {
+    const filePath = fileMatch[1].replace(/[.,;:!?]+$/, "");
+    return {
+      name: "github/delete-file",
+      args: {
+        repo,
+        user,
+        path: filePath,
+        branch: "main",
+        message: `Delete ${filePath} via Zarith`,
+      },
+    };
+  }
+
+  const branchMatch = original.match(/branch\s+([A-Za-z0-9_./\-]+)/i);
+  if (repo && branchMatch) {
+    const branch = branchMatch[1].replace(/[.,;:!?]+$/, "");
+    return { name: "github/delete-branch", args: { repo, user, branch } };
+  }
+
+  const repoDeleteIntent = /\b(reposit[oó]rio|repo)\b/.test(normalized) && /\b(inteiro|todo|permanentemente)?\b/.test(normalized);
+  if (repo && repoDeleteIntent && !fileMatch && !branchMatch) {
+    return { name: "github/delete-repo", args: { repo, user } };
+  }
+
+  return null;
+}
+
 const TOOL_ALIASES: Record<string, string> = {
   "github:repos": "github/list-repos",
   "github:read": "github/get-file",
@@ -772,6 +817,108 @@ export default function ChatPage() {
       tool_calls: []
     };
     setMessages((prev) => [...prev, assistantMsg]);
+
+    const preflightDestructiveRequest = detectPreflightDestructiveActionFromText(userContent);
+    if (preflightDestructiveRequest) {
+      const normalizedPreflightRequest: ToolCallRequest = {
+        ...preflightDestructiveRequest,
+        name: normalizeToolName(preflightDestructiveRequest.name),
+      };
+      const destructiveInfo = getDestructiveActionInfo(normalizedPreflightRequest);
+      if (destructiveInfo) {
+        const preflightToolCall: ToolCall = {
+          id: Math.random().toString(36).substring(7),
+          name: normalizedPreflightRequest.name,
+          args: normalizedPreflightRequest.args,
+          status: "calling",
+        };
+        setPlannerSteps([{
+          id: preflightToolCall.id,
+          title: `Aguardando confirmação: ${normalizedPreflightRequest.name}`,
+          status: "pending",
+        }]);
+        setIsPlannerOpen(true);
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === "assistant") {
+            last.content = `⚠️ **Ação destrutiva detectada antes da chamada ao modelo:** ${destructiveInfo.actionName}. Pausando antes de executar. Confirme ou cancele no card de segurança.`;
+            last.tool_calls = [];
+          }
+          return updated;
+        });
+
+        try {
+          const approved = await requestDestructiveApproval(destructiveInfo, normalizedPreflightRequest);
+          if (controller.signal.aborted) throw new DOMException("Execução cancelada", "AbortError");
+
+          if (!approved) {
+            const cancelNotice = `⚠️ **AÇÃO DESTRUTIVA CANCELADA**
+
+A ação **${destructiveInfo.actionName}** foi cancelada antes da execução. Nenhuma ferramenta destrutiva foi chamada.`;
+            setPlannerSteps(prev => prev.map(step => step.id === preflightToolCall.id ? { ...step, status: "failed" as const } : step));
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last?.role === "assistant") last.content = cancelNotice;
+              return updated;
+            });
+            if (sessionId) await saveChatMessage(sessionId, "assistant", cancelNotice, selectedModel.name);
+            setIsLoading(false);
+            setIsPlannerOpen(false);
+            setCurrentToolName(null);
+            abortControllerRef.current = null;
+            return;
+          }
+
+          setCurrentToolName(normalizedPreflightRequest.name);
+          setPlannerSteps(prev => prev.map(step => step.id === preflightToolCall.id ? { ...step, status: "running" as const } : step));
+          const result = await executeToolCall(normalizedPreflightRequest, addLog, updateToolCall);
+          setPlannerSteps(prev => prev.map(step => step.id === preflightToolCall.id ? { ...step, status: result.status === "success" ? "completed" as const : "failed" as const } : step));
+          const finalNotice = `${formatToolResultsForUser([result]) || `**${result.name}** finalizada com status ${result.status}.`}
+
+> Gate de segurança aplicado: a ferramenta só foi chamada depois da confirmação visual explícita.`;
+          setMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            if (last?.role === "assistant") {
+              last.content = finalNotice;
+              last.tool_calls = [result];
+              last.model = selectedModel.name;
+            }
+            return updated;
+          });
+          if (sessionId) await saveChatMessage(sessionId, "assistant", finalNotice, selectedModel.name);
+          setIsLoading(false);
+          setIsPlannerOpen(false);
+          setCurrentToolName(null);
+          abortControllerRef.current = null;
+          return;
+        } catch (error) {
+          const wasAborted = error instanceof DOMException && error.name === "AbortError";
+          const errorNotice = wasAborted
+            ? "Execução cancelada antes da ação destrutiva. Nenhuma ferramenta destrutiva foi chamada."
+            : getZarithError(error, selectedModel.name);
+          setMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            if (last?.role === "assistant") {
+              last.content = last.content ? `${last.content}
+
+${errorNotice}` : errorNotice;
+              last.isError = !wasAborted;
+            }
+            return updated;
+          });
+          addLog(wasAborted ? "info" : "error", wasAborted ? "Ação destrutiva cancelada antes da execução." : `Erro no gate preventivo: ${errorNotice}`);
+          setIsLoading(false);
+          setIsPlannerOpen(false);
+          setCurrentToolName(null);
+          abortControllerRef.current = null;
+          return;
+        }
+      }
+    }
 
     type AgentHistoryMessage = {
       role: "system" | "user" | "assistant" | "tool";
