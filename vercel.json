@@ -8,8 +8,13 @@
     "BASE_PATH": "/",
     "NODE_ENV": "production"
   },
+  "functions": {
+    "api/index.ts": {
+      "includeFiles": "artifacts/api-server/src/**"
+    }
+  },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index.ts" },
+    { "source": "/api/:path*", "destination": "/api/index.ts" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
