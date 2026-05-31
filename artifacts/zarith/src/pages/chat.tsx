@@ -809,7 +809,23 @@ export default function ChatPage() {
       let executedToolCalls: ToolCall[] = [];
       let continueLoop = true;
       let loopCount = 0;
-      const maxAgentLoops = 12;
+      const maxAgentLoops = 8;
+      const executedToolSignatures = new Set<string>();
+      const buildToolSignature = (name: string, args: unknown) => {
+        const normalize = (value: unknown): unknown => {
+          if (Array.isArray(value)) return value.map(normalize);
+          if (value && typeof value === "object") {
+            return Object.keys(value as Record<string, unknown>)
+              .sort()
+              .reduce<Record<string, unknown>>((acc, key) => {
+                acc[key] = normalize((value as Record<string, unknown>)[key]);
+                return acc;
+              }, {});
+          }
+          return value;
+        };
+        return `${normalizeToolName(name)}:${JSON.stringify(normalize(args || {}))}`;
+      };
 
       while (continueLoop && loopCount < maxAgentLoops) {
         if (controller.signal.aborted) throw new DOMException("Execução cancelada", "AbortError");
@@ -844,7 +860,13 @@ export default function ChatPage() {
           fullResponse = `⚠️ Nenhuma chave de API configurada ou modelo disponível para **${selectedModelForRun.name}**, Jadiel. Vai em **Configurações → API Keys** e bota a chave lá. Sem chave, sem resposta — é assim que funciona. Erro: ${lastError}`;
         }
 
-        const detectedToolRequests = parseToolCallsFromText(fullResponse);
+        const rawDetectedToolRequests = parseToolCallsFromText(fullResponse);
+        const duplicateToolRequests = rawDetectedToolRequests.filter((request) =>
+          executedToolSignatures.has(buildToolSignature(request.name, request.args))
+        );
+        const detectedToolRequests = rawDetectedToolRequests.filter((request) =>
+          !executedToolSignatures.has(buildToolSignature(request.name, request.args))
+        );
         const visibleResponse = stripToolCallsFromText(fullResponse);
 
         if (visibleResponse) {
@@ -872,9 +894,32 @@ export default function ChatPage() {
 
         agentHistory.push({ role: "assistant", content: fullResponse });
 
+        if (duplicateToolRequests.length > 0) {
+          const duplicatedNames = duplicateToolRequests.map((request) => normalizeToolName(request.name)).join(", ");
+          addLog("info", `Loop ${loopCount}: ${duplicateToolRequests.length} chamada(s) repetida(s) ignorada(s): ${duplicatedNames}.`);
+          agentHistory.push({
+            role: "tool",
+            name: "agent/duplicate-tool-guard",
+            content: `As chamadas de ferramenta repetidas (${duplicatedNames}) já foram executadas com os mesmos argumentos neste ciclo. Não repita essas chamadas; use os resultados já injetados no contexto para responder ou escolha apenas a próxima ferramenta concreta ainda não executada.`
+          });
+        }
+
         if (detectedToolRequests.length === 0) {
           continueLoop = false;
           setCurrentToolName(null);
+          if (rawDetectedToolRequests.length > 0) {
+            const guardNotice = "\n\n> ⚠️ Interrompi chamadas repetidas da mesma ferramenta com os mesmos argumentos para evitar loop infinito. Usei os resultados já obtidos como contexto final.";
+            finalContent += guardNotice;
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last?.role === "assistant") {
+                last.content = finalContent;
+                last.tool_calls = executedToolCalls;
+              }
+              return updated;
+            });
+          }
           break;
         }
 
@@ -911,6 +956,8 @@ export default function ChatPage() {
           const request = detectedToolRequests[index];
           const normalizedName = normalizeToolName(request.name);
           const plannerStepId = initialCalls[index]?.id;
+          const toolSignature = buildToolSignature(normalizedName, request.args);
+          executedToolSignatures.add(toolSignature);
 
           if (request.name.startsWith("vision/") && activeAttachments.length > 0 && !request.args?.imageBase64) {
             const firstImage = activeAttachments[0];
@@ -930,7 +977,13 @@ export default function ChatPage() {
           const result = await executeToolCall({ ...request, name: normalizedName }, addLog, updateToolCall);
           loopExecutedToolCalls.push(result);
           executedToolCalls = [...executedToolCalls, result];
-          agentHistory.push({ role: "tool", name: result.name, content: formatToolResultForModel(result) });
+          agentHistory.push({
+            role: "tool",
+            name: result.name,
+            content: `${formatToolResultForModel(result)}
+
+Instrução de continuidade: este resultado já está no contexto. Não chame novamente a mesma ferramenta com os mesmos argumentos; se ainda faltar algo para concluir o pedido, chame somente a próxima ferramenta necessária. Se não faltar, responda ao usuário sem tool_call.`
+          });
 
           setPlannerSteps(prev => prev.map(step =>
             step.id === plannerStepId
