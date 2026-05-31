@@ -880,6 +880,7 @@ ${executedToolCalls.map(call => {
           }
           return updated;
         });
+        setIsPlannerOpen(false);
       }
 
       // Salvar resposta da Zarith no Supabase após execução das ferramentas
@@ -905,6 +906,7 @@ ${executedToolCalls.map(call => {
       addLog('error', `Erro ao processar mensagem: ${zarithError}`);
     } finally {
       setIsLoading(false);
+      setIsPlannerOpen(false);
     }
   }, [isLoading, activeModel, messages, currentSessionId, createNewSession, saveChatMessage, addLog, updateToolCall, attachedImages]);
 
@@ -997,6 +999,7 @@ ${executedToolCalls.map(call => {
     }
 
     addLog('success', 'Execução de ferramentas concluída');
+    setIsPlannerOpen(false);
   }, [toolCalls, addLog, updateToolCall]);
 
   if (!authChecked) {
@@ -1029,69 +1032,10 @@ ${executedToolCalls.map(call => {
           <div className="w-10 md:hidden shrink-0" />
           <div className="flex-1" />
 
-          {/* Model selector */}
-          <div className="relative">
-            <button
-              onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-xl hover:border-[#00f5ff] transition-all text-xs md:text-sm font-bold"
-            >
-              <span className="text-[#00f5ff]">{activeModel.icon}</span>
-              <span className="hidden sm:inline">{activeModel.name}</span>
-              <ChevronDown size={12} className={`transition-transform ${isModelMenuOpen ? "rotate-180" : ""}`} />
-            </button>
-
-            <AnimatePresence>
-              {isModelMenuOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: -8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  className="absolute right-0 top-full mt-2 w-52 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl shadow-2xl overflow-hidden z-50"
-                >
-                  {MODELS.map((model) => (
-                    <button
-                      key={model.id}
-                      onClick={() => { setActiveModel(model); setIsModelMenuOpen(false); }}
-                      className={`w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[var(--bg-card-hover)] transition-all text-left text-sm ${activeModel.id === model.id ? "text-[#00f5ff]" : ""}`}
-                    >
-                      <span>{model.icon}</span>
-                      <div>
-                        <p className="font-bold text-xs">{model.name}</p>
-                        <p className="text-[10px] text-[var(--text-secondary)]">{model.desc}</p>
-                      </div>
-                    </button>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.24em] text-[#00f5ff]/70">
+            <Zap size={14} />
+            <span className="hidden sm:inline">Zarith Super Agente</span>
           </div>
-
-          {/* Logs toggle */}
-          <button
-            onClick={() => setIsLogsOpen(!isLogsOpen)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all text-xs font-bold ${
-              isLogsOpen
-                ? "bg-[#bf00ff]/10 border-[#bf00ff] text-[#bf00ff]"
-                : "border-[var(--border-glow)] text-[var(--text-secondary)]"
-            }`}
-          >
-            <Terminal size={13} />
-            <span className="hidden sm:inline">Logs</span>
-          </button>
-
-          {/* Web search toggle */}
-          <button
-            onClick={() => setWebSearchEnabled(!webSearchEnabled)}
-            title="Web search (requer chave Tavily)"
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all text-xs font-bold ${
-              webSearchEnabled
-                ? "bg-[#00f5ff]/10 border-[#00f5ff] text-[#00f5ff]"
-                : "border-[var(--border-glow)] text-[var(--text-secondary)]"
-            }`}
-          >
-            <Search size={13} />
-            <span className="hidden sm:inline">Web</span>
-          </button>
         </header>
 
         {/* Banner sem chave */}
@@ -1276,10 +1220,8 @@ ${executedToolCalls.map(call => {
         </main>
 
         {/* Input area */}
-        <footer className="p-4 md:p-6 bg-gradient-to-t from-[var(--bg-primary)] to-transparent shrink-0">
-          <div className="max-w-4xl mx-auto relative">
-            
-            {/* Planner Panel Toggle */}
+        <footer className="p-3 md:p-5 bg-gradient-to-t from-[var(--bg-primary)] via-[var(--bg-primary)]/95 to-transparent shrink-0">
+          <div className="max-w-4xl mx-auto">
             <AnimatePresence>
               {isPlannerOpen && (
                 <AgentPlannerPanel 
@@ -1289,23 +1231,23 @@ ${executedToolCalls.map(call => {
               )}
             </AnimatePresence>
 
-            {/* Floating Attachments */}
             <AnimatePresence>
               {attachedImages.length > 0 && (
                 <motion.div
-                  initial={{ opacity: 0, y: 10 }}
+                  initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 10 }}
-                  className="absolute bottom-full left-0 mb-4 flex gap-2 p-2 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl shadow-2xl z-20"
+                  exit={{ opacity: 0, y: 8 }}
+                  className="mb-3 flex gap-2 overflow-x-auto rounded-2xl border border-[var(--border-glow)] bg-[var(--bg-card)]/90 p-2 shadow-2xl scrollbar-hide"
                 >
                   {attachedImages.map((img) => (
-                    <div key={img.id} className="relative group w-16 h-16 md:w-20 md:h-20">
+                    <div key={img.id} className="relative group w-14 h-14 md:w-16 md:h-16 shrink-0">
                       <img src={img.dataUrl} alt="upload" className="w-full h-full object-cover rounded-xl border border-white/10" />
                       <button
                         onClick={() => setAttachedImages(prev => prev.filter(i => i.id !== img.id))}
-                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-1 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Remover anexo"
                       >
-                        <X size={12} />
+                        <X size={11} />
                       </button>
                     </div>
                   ))}
@@ -1315,48 +1257,112 @@ ${executedToolCalls.map(call => {
 
             <div className="relative group">
               <div className="absolute -inset-0.5 bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] rounded-[24px] blur opacity-20 group-focus-within:opacity-40 transition duration-500" />
-              <div className="relative bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-[22px] shadow-2xl overflow-hidden transition-all group-focus-within:border-[#00f5ff]/50">
+              <div className="relative flex items-end gap-2 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-[22px] shadow-2xl p-2 transition-all group-focus-within:border-[#00f5ff]/50">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleImageUpload}
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                />
+
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="h-11 w-11 shrink-0 rounded-2xl border border-white/10 bg-white/[0.03] text-[var(--text-secondary)] hover:text-[#00f5ff] hover:border-[#00f5ff]/50 hover:bg-[#00f5ff]/10 transition-all flex items-center justify-center"
+                  title="Anexar mídia"
+                >
+                  <ImageIcon size={18} />
+                </button>
+
                 <textarea
                   ref={textareaRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Manda a parada, Jadiel... pode anexar print, erro ou wireframe."
-                  className="w-full bg-transparent border-none focus:ring-0 text-sm md:text-base p-4 md:p-5 pr-24 md:pr-32 resize-none min-h-[56px] md:min-h-[64px] max-h-32 scrollbar-hide text-white placeholder-white/30 font-medium"
+                  className="flex-1 min-w-0 bg-transparent border-none focus:ring-0 text-sm md:text-base px-2 py-3 resize-none min-h-[44px] max-h-32 scrollbar-hide text-white placeholder-white/30 font-medium"
                 />
-                
-                <div className="absolute right-2 md:right-3 bottom-2 md:bottom-3 flex items-center gap-1 md:gap-2">
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleImageUpload}
-                    accept="image/*"
-                    multiple
-                    className="hidden"
-                  />
+
+                <div className="relative shrink-0">
                   <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="p-2 md:p-2.5 text-[var(--text-secondary)] hover:text-[#00f5ff] hover:bg-white/5 rounded-xl transition-all"
-                    title="Anexar imagem"
+                    onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
+                    className="h-11 flex items-center gap-1.5 px-2.5 md:px-3 bg-black/30 border border-[var(--border-glow)] rounded-2xl hover:border-[#00f5ff] transition-all text-xs font-bold"
+                    title="Selecionar modelo"
                   >
-                    <ImageIcon size={18} className="md:size-20" />
+                    <span className="text-[#00f5ff]">{activeModel.icon}</span>
+                    <span className="hidden sm:inline">{activeModel.name}</span>
+                    <ChevronDown size={12} className={`transition-transform ${isModelMenuOpen ? "rotate-180" : ""}`} />
                   </button>
-                  <button
-                    onClick={handleSendMessage}
-                    disabled={isLoading || (!input.trim() && attachedImages.length === 0)}
-                    className={`p-2 md:p-2.5 rounded-xl transition-all shadow-lg flex items-center justify-center ${
-                      isLoading || (!input.trim() && attachedImages.length === 0)
-                        ? "bg-white/5 text-white/20 cursor-not-allowed"
-                        : "bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] text-black hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(0,245,255,0.3)]"
-                    }`}
-                  >
-                    {isLoading ? (
-                      <div className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <Send size={18} className="md:size-20" fill="currentColor" />
+
+                  <AnimatePresence>
+                    {isModelMenuOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 8 }}
+                        className="absolute right-0 bottom-full mb-2 w-52 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl shadow-2xl overflow-hidden z-50"
+                      >
+                        {MODELS.map((model) => (
+                          <button
+                            key={model.id}
+                            onClick={() => { setActiveModel(model); setIsModelMenuOpen(false); }}
+                            className={`w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[var(--bg-card-hover)] transition-all text-left text-sm ${activeModel.id === model.id ? "text-[#00f5ff]" : ""}`}
+                          >
+                            <span>{model.icon}</span>
+                            <div>
+                              <p className="font-bold text-xs">{model.name}</p>
+                              <p className="text-[10px] text-[var(--text-secondary)]">{model.desc}</p>
+                            </div>
+                          </button>
+                        ))}
+                      </motion.div>
                     )}
-                  </button>
+                  </AnimatePresence>
                 </div>
+
+                <button
+                  onClick={() => setIsLogsOpen(!isLogsOpen)}
+                  className={`h-11 shrink-0 flex items-center gap-1.5 px-2.5 md:px-3 rounded-2xl border transition-all text-xs font-bold ${
+                    isLogsOpen
+                      ? "bg-[#bf00ff]/10 border-[#bf00ff] text-[#bf00ff]"
+                      : "border-[var(--border-glow)] text-[var(--text-secondary)] hover:border-[#bf00ff]/60 hover:text-[#bf00ff]"
+                  }`}
+                  title="Logs de execução"
+                >
+                  <Terminal size={14} />
+                  <span className="hidden md:inline">Logs</span>
+                </button>
+
+                <button
+                  onClick={() => setWebSearchEnabled(!webSearchEnabled)}
+                  title="Web search (requer chave Tavily)"
+                  className={`h-11 shrink-0 flex items-center gap-1.5 px-2.5 md:px-3 rounded-2xl border transition-all text-xs font-bold ${
+                    webSearchEnabled
+                      ? "bg-[#00f5ff]/10 border-[#00f5ff] text-[#00f5ff]"
+                      : "border-[var(--border-glow)] text-[var(--text-secondary)] hover:border-[#00f5ff]/60 hover:text-[#00f5ff]"
+                  }`}
+                >
+                  <Search size={14} />
+                  <span className="hidden md:inline">Web</span>
+                </button>
+
+                <button
+                  onClick={handleSendMessage}
+                  disabled={isLoading || (!input.trim() && attachedImages.length === 0)}
+                  className={`h-11 w-11 shrink-0 rounded-2xl transition-all shadow-lg flex items-center justify-center ${
+                    isLoading || (!input.trim() && attachedImages.length === 0)
+                      ? "bg-white/5 text-white/20 cursor-not-allowed"
+                      : "bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] text-black hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(0,245,255,0.3)]"
+                  }`}
+                  title="Enviar mensagem"
+                >
+                  {isLoading ? (
+                    <div className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Send size={18} fill="currentColor" />
+                  )}
+                </button>
               </div>
             </div>
             
