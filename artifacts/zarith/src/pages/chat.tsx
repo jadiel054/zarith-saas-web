@@ -60,12 +60,11 @@ Você opera como agente autônoma de engenharia. Isso significa:
    - Informe qual modelo de IA vai usar (você decide baseado na tarefa)
    - Estime a complexidade: simples / médio / complexo
 
-2. Execute o plano SEM pedir confirmação a cada passo, EXCETO:
-   - Deletar repositório ou branch → explique o motivo e impacto
-   - Apagar tabelas do Supabase → liste exatamente quais tabelas,
-     dados que serão perdidos e consequências
-   - Quando uma credencial necessária não estiver disponível →
-     solicite no formato exato (ex: GitHub Token no formato ghp_...)
+2. Execute o plano SEM pedir confirmação a cada passo. Você é autônoma.
+   - Deletar repositório ou branch → apenas informe o motivo.
+   - Apagar tabelas do Supabase → informe quais dados serão perdidos.
+   - Suas credenciais já estão configuradas no ambiente isolado do api-server.
+   - O usuário padrão do GitHub é 'jadiel054'. Nunca use 'Jadiel Alves' ou pergunte o nome de usuário.
 
 3. Ao encontrar um erro durante a execução:
    - Analise o erro
@@ -865,44 +864,8 @@ ${JSON.stringify(toolContext, null, 2)}
       }
 
       // ── DETECÇÃO DE INTENÇÕES (Protocolo de Elite) ──
-      const contentLower = finalContent.toLowerCase();
-
-      if (contentLower.includes("deploy") || contentLower.includes("publicar")) {
-        addLog('thinking', 'Zarith identificou intenção de deploy.');
-        setPendingAction({
-          type: 'deploy',
-          plan: "Publicar interface React no ambiente de produção Vercel.",
-          command: "vercel deploy --prod",
-          payload: { files: [{ file: "index.html", data: "<html><body><h1>Zarith Deploy</h1></body></html>" }] }
-        });
-      } else if (contentLower.includes("github") || contentLower.includes("repositório")) {
-        addLog('thinking', 'Zarith identificou intenção de GitHub.');
-        setPendingAction({
-          type: 'github',
-          plan: "Criar novo repositório privado no GitHub para o projeto.",
-          command: "gh repo create zarith-app --private",
-          payload: { name: "zarith-app" }
-        });
-      } else if (contentLower.includes("tabela") || contentLower.includes("sql") || contentLower.includes("banco")) {
-        addLog('thinking', 'Zarith identificou intenção de Banco de Dados.');
-        setPendingAction({
-          type: 'supabase',
-          plan: "Executar migração DDL no Supabase para criar novas tabelas.",
-          command: "supabase db push (remote)",
-          payload: { sql: "CREATE TABLE test_zarith (id uuid primary key);" }
-        });
-      } else if (contentLower.includes("template") || contentLower.includes("boilerplate")) {
-        const template = templatesService.findTemplate(contentLower);
-        if (template) {
-          addLog('thinking', `Zarith encontrou template compatível: ${template.name}`);
-          setPendingAction({
-            type: 'template',
-            plan: `Usar template pré-definido: ${template.name}`,
-            command: `zarith use-template ${template.id}`,
-            payload: template
-          });
-        }
-      }
+      // O Protocolo de Elite agora é executado via Tool Calls automáticas.
+      // O banner de autorização manual foi removido para dar fluidez à Zarith.
 
     } catch (error) {
       const zarithError = getZarithError(error, activeModel.name);
