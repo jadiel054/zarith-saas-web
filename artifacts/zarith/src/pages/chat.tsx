@@ -357,7 +357,28 @@ interface ActiveProjectContext {
   updatedAt: number;
 }
 
+interface ChangelogData {
+  version: string;
+  date: string;
+  changes: string[];
+}
+
 const ACTIVE_PROJECT_CONTEXT_STORAGE_KEY = "zarith_active_project_context";
+const PWA_UPDATE_REQUESTED_STORAGE_KEY = "zarith_pwa_update_requested";
+
+function formatPwaVersion(version: string | null): string {
+  if (!version) return "2.5";
+  const parsedDate = new Date(version);
+  if (!Number.isNaN(parsedDate.getTime())) {
+    return parsedDate.toLocaleString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+  return version;
+}
 
 function loadStoredActiveProjectContext(): ActiveProjectContext | null {
   if (typeof window === "undefined") return null;
@@ -762,6 +783,12 @@ export default function ChatPage() {
     if (typeof window === "undefined") return false;
     return !window.matchMedia("(display-mode: standalone)").matches;
   });
+  const [pwaUpdateAvailable, setPwaUpdateAvailable] = useState(false);
+  const [pwaUpdateVersion, setPwaUpdateVersion] = useState<string | null>(null);
+  const [showChangelogModal, setShowChangelogModal] = useState(false);
+  const [changelog, setChangelog] = useState<ChangelogData | null>(null);
+  const [isChangelogLoading, setIsChangelogLoading] = useState(false);
+  const [changelogError, setChangelogError] = useState<string | null>(null);
   const [displayModePreference, setDisplayModePreference] = useState<DisplayModePreference>(() => getInitialDisplayModePreference());
   const [pendingAction, setPendingAction] = useState<{ plan: string; command: string } | null>(null);
   const [userData, setUserData] = useState<UserData>({ name: "Jadiel" });
@@ -1677,6 +1704,49 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
     };
   }, []);
 
+  useEffect(() => {
+    const showPwaUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<{ version?: string }>).detail;
+      setPwaUpdateVersion(detail?.version || null);
+      setPwaUpdateAvailable(true);
+    };
+
+    window.addEventListener("zarith:pwa-update-available", showPwaUpdate);
+    return () => window.removeEventListener("zarith:pwa-update-available", showPwaUpdate);
+  }, []);
+
+  const handleViewChangelog = useCallback(async () => {
+    setShowChangelogModal(true);
+    setChangelogError(null);
+
+    if (changelog) return;
+
+    setIsChangelogLoading(true);
+    try {
+      const response = await fetch(`/changelog.json?ts=${Date.now()}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json() as ChangelogData;
+      setChangelog(data);
+    } catch (error) {
+      setChangelogError(`Não consegui carregar o changelog agora. Erro: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsChangelogLoading(false);
+    }
+  }, [changelog]);
+
+  const handlePwaUpdate = useCallback(() => {
+    const waitingWorker = window.zarithWaitingServiceWorker || window.zarithServiceWorkerRegistration?.waiting;
+    window.sessionStorage.setItem(PWA_UPDATE_REQUESTED_STORAGE_KEY, "true");
+
+    if (waitingWorker) {
+      waitingWorker.postMessage({ type: "SKIP_WAITING" });
+      return;
+    }
+
+    navigator.serviceWorker?.controller?.postMessage({ type: "SKIP_WAITING" });
+    window.location.reload();
+  }, []);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -1771,6 +1841,43 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
             <span className="hidden sm:inline">Zarith Super Agente</span>
           </div>
         </header>
+
+        {/* Banner de atualização PWA */}
+        <AnimatePresence>
+          {pwaUpdateAvailable && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden border-b border-[#00f5ff]/30 bg-gradient-to-r from-[#00f5ff]/12 via-[#bf00ff]/10 to-[#00f5ff]/8 shadow-[0_0_28px_rgba(0,245,255,0.10)] shrink-0"
+            >
+              <div className="mx-auto flex max-w-4xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-xs font-black uppercase tracking-[0.20em] text-[#00f5ff]">
+                    ✨ Nova versão disponível — v{formatPwaVersion(pwaUpdateVersion)}
+                  </p>
+                  <p className="mt-1 text-[11px] font-medium leading-relaxed text-white/65">
+                    A atualização já está pronta em segundo plano. A Zarith só recarrega quando você mandar.
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    onClick={handleViewChangelog}
+                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-white/80 transition-all hover:border-white/25 hover:bg-white/10"
+                  >
+                    Ver novidades
+                  </button>
+                  <button
+                    onClick={handlePwaUpdate}
+                    className="rounded-xl border border-[#00f5ff]/50 bg-[#00f5ff] px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-black shadow-[0_0_20px_rgba(0,245,255,0.30)] transition-all hover:brightness-110"
+                  >
+                    Atualizar agora
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Banner sem chave */}
         <AnimatePresence>
@@ -2221,6 +2328,88 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
               logs={logs} 
               onClose={() => setIsLogsOpen(false)} 
             />
+          )}
+        </AnimatePresence>
+
+        {/* Modal de changelog */}
+        <AnimatePresence>
+          {showChangelogModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-md"
+              role="dialog"
+              aria-modal="true"
+              aria-label="O que há de novo"
+              onClick={() => setShowChangelogModal(false)}
+            >
+              <motion.div
+                initial={{ scale: 0.96, opacity: 0, y: 18 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.96, opacity: 0, y: 18 }}
+                transition={{ type: "spring", stiffness: 260, damping: 24 }}
+                className="w-full max-w-lg overflow-hidden rounded-3xl border border-[#00f5ff]/25 bg-[var(--bg-card)] shadow-[0_0_45px_rgba(0,245,255,0.18)]"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-start justify-between gap-4 border-b border-white/10 bg-gradient-to-r from-[#00f5ff]/10 to-[#bf00ff]/10 px-5 py-4">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#00f5ff]">Atualização da Zarith</p>
+                    <h2 className="mt-1 text-xl font-black text-white">O que há de novo</h2>
+                    <p className="mt-1 text-xs font-medium text-white/55">
+                      Versão {changelog?.version || "2.5"} • {changelog?.date || "2026-05-31"}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowChangelogModal(false)}
+                    className="rounded-full border border-white/10 bg-white/5 p-2 text-white/60 transition-all hover:bg-white/10 hover:text-white"
+                    aria-label="Fechar novidades"
+                    title="Fechar"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <div className="px-5 py-5">
+                  {isChangelogLoading ? (
+                    <div className="flex items-center gap-3 rounded-2xl border border-[#00f5ff]/20 bg-[#00f5ff]/5 px-4 py-4 text-sm font-bold text-[#00f5ff]">
+                      <WaveformLoader size="22" stroke="3" speed="1" color="#00f5ff" />
+                      Carregando novidades...
+                    </div>
+                  ) : changelogError ? (
+                    <div className="rounded-2xl border border-[#ff0080]/25 bg-[#ff0080]/10 px-4 py-4 text-sm leading-relaxed text-[#ff8ac4]">
+                      {changelogError}
+                    </div>
+                  ) : (
+                    <ul className="space-y-3">
+                      {(changelog?.changes || []).map((change, index) => (
+                        <li key={`${change}-${index}`} className="flex gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm leading-relaxed text-white/82">
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#00f5ff]/15 text-[11px] font-black text-[#00f5ff]">
+                            {index + 1}
+                          </span>
+                          <span>{change}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div className="flex flex-col-reverse gap-2 border-t border-white/10 px-5 py-4 sm:flex-row sm:justify-end">
+                  <button
+                    onClick={() => setShowChangelogModal(false)}
+                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-black uppercase tracking-[0.14em] text-white/75 transition-all hover:bg-white/10"
+                  >
+                    Depois
+                  </button>
+                  <button
+                    onClick={handlePwaUpdate}
+                    className="rounded-xl border border-[#00f5ff]/50 bg-[#00f5ff] px-4 py-2 text-xs font-black uppercase tracking-[0.14em] text-black shadow-[0_0_20px_rgba(0,245,255,0.30)] transition-all hover:brightness-110"
+                  >
+                    Atualizar agora
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
           )}
         </AnimatePresence>
 

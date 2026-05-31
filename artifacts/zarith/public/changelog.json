@@ -1,0 +1,11 @@
+{
+  "version": "2.5",
+  "date": "2026-05-31",
+  "changes": [
+    "Atualização automática do PWA com detecção de nova versão em segundo plano, sem reiniciar a sessão do usuário à força.",
+    "Banner de nova versão disponível com ações para ver novidades ou atualizar imediatamente quando o deploy novo estiver pronto.",
+    "Modal \"O que há de novo\" carregado dinamicamente a partir do changelog público da aplicação.",
+    "Versionamento automático de build com data e hora do deploy para identificar precisamente a versão disponível.",
+    "Fluxo de ativação controlada do service worker para aplicar a atualização somente quando o usuário escolher."
+  ]
+}

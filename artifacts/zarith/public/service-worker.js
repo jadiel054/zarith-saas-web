@@ -1,18 +1,25 @@
-const CACHE_NAME = 'zarith-pwa-v2';
+const BUILD_VERSION = '__ZARITH_BUILD_VERSION__';
+const CACHE_NAME = `zarith-pwa-${BUILD_VERSION}`;
 const APP_SHELL = [
   '/',
   '/chat',
   '/index.html',
   '/manifest.json',
+  '/changelog.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png'
 ];
+
+async function notifyClients(message) {
+  const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  await Promise.all(clients.map((client) => client.postMessage({ version: BUILD_VERSION, ...message })));
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => cache.addAll(APP_SHELL))
-      .then(() => self.skipWaiting())
+      .then(() => notifyClients({ type: 'SW_UPDATE_READY' }))
   );
 });
 
@@ -23,7 +30,14 @@ self.addEventListener('activate', (event) => {
         keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
       ))
       .then(() => self.clients.claim())
+      .then(() => notifyClients({ type: 'SW_ACTIVATED' }))
   );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('fetch', (event) => {

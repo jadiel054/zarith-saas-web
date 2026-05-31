@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+import { readFile, writeFile } from "node:fs/promises";
 
 const isProduction = process.env.NODE_ENV === "production";
 // CORREÇÃO: verifica REPL_ID *antes* de tentar importar plugins Replit.
@@ -23,7 +24,24 @@ async function tryImport<T>(moduleId: string, getter: (mod: T) => unknown): Prom
 }
 
 export default defineConfig(async () => {
-  const plugins: unknown[] = [react(), tailwindcss()];
+  const buildVersion = new Date().toISOString();
+  const plugins: unknown[] = [
+    react(),
+    tailwindcss(),
+    {
+      name: "zarith-service-worker-build-version",
+      apply: "build",
+      async closeBundle() {
+        const serviceWorkerPath = path.resolve(import.meta.dirname, "dist/public/service-worker.js");
+        const serviceWorker = await readFile(serviceWorkerPath, "utf8");
+        await writeFile(
+          serviceWorkerPath,
+          serviceWorker.replaceAll("__ZARITH_BUILD_VERSION__", buildVersion),
+          "utf8"
+        );
+      },
+    },
+  ];
 
   // Plugins de desenvolvimento Replit — só carregados em dev E dentro do Replit
   if (!isProduction && isReplit) {
@@ -50,6 +68,10 @@ export default defineConfig(async () => {
   return {
     base: basePath,
     plugins,
+    define: {
+      "import.meta.env.VITE_BUILD_VERSION": JSON.stringify(buildVersion),
+      __ZARITH_BUILD_VERSION__: JSON.stringify(buildVersion),
+    },
     resolve: {
       alias: {
         "@": path.resolve(import.meta.dirname, "src"),
