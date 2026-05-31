@@ -113,7 +113,7 @@ router.post(["/list-files"], async (req: Request, res: Response) => {
 });
 
 async function putContent(req: Request, mustHaveSha: boolean, method = "PUT") {
-  const body = getBody(req); const { owner, repo } = repoParts(req); const filePath = required(body.path || body.filePath, "path");
+  const body = getBody(req); const { owner, repo } = repoParts(req); const filePath = required(body.path || body.file || body.filePath, "path");
   const payload: any = { message: body.message || `Atualiza ${filePath} via Zarith`, content: encodeBase64(String(body.content ?? "")), branch: body.branch };
   if (body.sha) payload.sha = body.sha;
   if (mustHaveSha && !payload.sha) {
