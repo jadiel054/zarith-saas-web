@@ -1,7 +1,6 @@
 {
   "version": 2,
   "buildCommand": "pnpm --config.verify-deps-before-run=false --filter @workspace/api-server run build && pnpm --config.verify-deps-before-run=false --filter @workspace/zarith run build",
-  "outputDirectory": "artifacts/zarith/dist/public",
   "installCommand": "pnpm install --ignore-scripts",
   "framework": null,
   "env": {
@@ -14,14 +13,9 @@
     }
   },
   "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/index.ts"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
-    }
+    { "src": "/api/(.*)", "dest": "/api/index.ts" },
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "/artifacts/zarith/dist/public/index.html" }
   ],
   "headers": [
     {
