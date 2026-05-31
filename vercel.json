@@ -6,7 +6,8 @@
   "framework": null,
   "env": {
     "BASE_PATH": "/",
-    "NODE_ENV": "production"
+    "NODE_ENV": "production",
+    "VERCEL_TERMINATE_ON_FAILURE": "0"
   },
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
