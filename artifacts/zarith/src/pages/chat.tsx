@@ -162,6 +162,18 @@ Quando o usuário reportar erro ou pedir para analisar projeto:
 8. Reporte o que foi feito
 
 ═══════════════════════════════════════
+MEMÓRIA DE SESSÃO
+═══════════════════════════════════════
+Quando o usuário mencionar ou você identificar um projeto ativo,
+lembre-o durante toda a conversa. Não pergunte o repositório de
+novo se já foi mencionado. Use o contexto acumulado para ser
+mais eficiente nas próximas ações.
+
+Se o contexto ativo enviado pelo frontend trouxer repositório, branch
+ou stack, use esses dados como padrão para tools GitHub, Supabase e
+Vercel, a menos que o usuário indique outro alvo explicitamente.
+
+═══════════════════════════════════════
 REGRAS DE SEGURANÇA
 ═══════════════════════════════════════
 SEGURANÇA — AÇÕES DESTRUTIVAS:
@@ -312,6 +324,108 @@ interface DestructiveActionInfo {
 interface PendingDestructiveAction extends DestructiveActionInfo {
   id: string;
   request: ToolCallRequest;
+}
+
+interface ActiveProjectContext {
+  repo: string;
+  branch: string;
+  stack: string;
+  provider: string;
+  updatedAt: number;
+}
+
+const ACTIVE_PROJECT_CONTEXT_STORAGE_KEY = "zarith_active_project_context";
+
+function loadStoredActiveProjectContext(): ActiveProjectContext | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(ACTIVE_PROJECT_CONTEXT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ActiveProjectContext>;
+    if (!parsed.repo || typeof parsed.repo !== "string") return null;
+    return {
+      repo: parsed.repo,
+      branch: parsed.branch || "main",
+      stack: parsed.stack || parsed.provider || "GitHub",
+      provider: parsed.provider || "GitHub",
+      updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function cleanContextToken(value?: string | null): string | undefined {
+  const cleaned = String(value || "")
+    .trim()
+    .replace(/^['"`]+|['"`]+$/g, "")
+    .replace(/[.,;:!?]+$/g, "");
+  return cleaned || undefined;
+}
+
+function mergeActiveProjectContext(
+  current: ActiveProjectContext | null,
+  partial: Partial<ActiveProjectContext> | null
+): ActiveProjectContext | null {
+  const repo = cleanContextToken(partial?.repo) || current?.repo;
+  if (!repo) return current;
+
+  return {
+    repo,
+    branch: cleanContextToken(partial?.branch) || current?.branch || "main",
+    stack: cleanContextToken(partial?.stack) || cleanContextToken(partial?.provider) || current?.stack || "GitHub",
+    provider: cleanContextToken(partial?.provider) || current?.provider || "GitHub",
+    updatedAt: Date.now(),
+  };
+}
+
+function inferActiveProjectContextFromText(text: string, current: ActiveProjectContext | null): ActiveProjectContext | null {
+  const original = String(text || "");
+  const repoMatch = original.match(/(?:reposit[oó]rio|repo|projeto)\s+(?:ativo\s+)?([A-Za-z0-9_.-]+)/i)
+    || original.match(/\b(zarith-[A-Za-z0-9_.-]+)\b/i);
+  const branchMatch = original.match(/(?:branch|ramo)\s+([A-Za-z0-9_./-]+)/i)
+    || original.match(/\b(main|master|develop|homolog|production)\b/i);
+
+  const repo = cleanContextToken(repoMatch?.[1]);
+  const branch = cleanContextToken(branchMatch?.[1]);
+  if (!repo && !branch) return current;
+
+  return mergeActiveProjectContext(current, {
+    repo: repo || current?.repo,
+    branch: branch || current?.branch || "main",
+    stack: current?.stack || "GitHub",
+    provider: current?.provider || "GitHub",
+  });
+}
+
+function inferActiveProjectContextFromToolRequest(
+  request: ToolCallRequest,
+  current: ActiveProjectContext | null
+): ActiveProjectContext | null {
+  const actionName = normalizeToolName(request.name);
+  const args = request.args || {};
+
+  if (actionName.startsWith("github/")) {
+    const repo = getArgValue(args, ["repo", "repository", "repoName", "name"]);
+    const branch = getArgValue(args, ["branch", "ref", "base"]);
+    return mergeActiveProjectContext(current, { repo, branch: branch || current?.branch || "main", stack: "GitHub", provider: "GitHub" });
+  }
+
+  if (actionName.startsWith("vercel/")) {
+    const repo = getArgValue(args, ["repo", "project", "projectName", "name"]);
+    return mergeActiveProjectContext(current, { repo, branch: current?.branch || "main", stack: "Vercel", provider: "Vercel" });
+  }
+
+  if (actionName.startsWith("supabase/")) {
+    return current ? mergeActiveProjectContext(current, { stack: current.stack || "Supabase", provider: current.provider || "Supabase" }) : current;
+  }
+
+  return current;
+}
+
+function formatActiveProjectContextForPrompt(context: ActiveProjectContext | null): string {
+  if (!context) return "";
+  return `CONTEXTO ATIVO DA SESSÃO:\n- Projeto/repositório: ${context.repo}\n- Branch padrão: ${context.branch}\n- Stack/origem: ${context.stack}\nUse este contexto acumulado sem perguntar novamente pelo repositório, a menos que o usuário mude explicitamente o projeto ativo.`;
 }
 
 const DESTRUCTIVE_TOOL_NAMES = new Set([
@@ -620,6 +734,7 @@ export default function ChatPage() {
   const [plannerSteps, setPlannerSteps] = useState<PlanStep[]>([]);
   const [currentToolName, setCurrentToolName] = useState<string | null>(null);
   const [pendingDestructiveAction, setPendingDestructiveAction] = useState<PendingDestructiveAction | null>(null);
+  const [activeProjectContext, setActiveProjectContext] = useState<ActiveProjectContext | null>(() => loadStoredActiveProjectContext());
   const [pendingAction, setPendingAction] = useState<{ plan: string; command: string } | null>(null);
   const [userData, setUserData] = useState<UserData>({ name: "Jadiel" });
   const [authChecked, setAuthChecked] = useState(false);
@@ -747,6 +862,25 @@ export default function ChatPage() {
     checkAuth();
   }, []);
 
+  // ── Persistência do contexto ativo de sessão ──
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (activeProjectContext) {
+        window.localStorage.setItem(ACTIVE_PROJECT_CONTEXT_STORAGE_KEY, JSON.stringify(activeProjectContext));
+      } else {
+        window.localStorage.removeItem(ACTIVE_PROJECT_CONTEXT_STORAGE_KEY);
+      }
+    } catch (error) {
+      addLog("error", `Falha ao persistir contexto ativo: ${error}`);
+    }
+  }, [activeProjectContext, addLog]);
+
+  const clearActiveProjectContext = useCallback(() => {
+    setActiveProjectContext(null);
+    addLog("info", "Contexto ativo de projeto limpo pelo usuário.");
+  }, [addLog]);
+
   // ── Scroll to bottom ──
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -769,6 +903,13 @@ export default function ChatPage() {
       `Imagem ${idx + 1}: ${img.name} (${img.type}) disponível para análise via vision/analyze-image.`
     ).join("\n");
     const userContent = [content.trim(), attachmentContext].filter(Boolean).join("\n\n");
+    let runtimeActiveProjectContext = inferActiveProjectContextFromText(userContent, activeProjectContext);
+    if (runtimeActiveProjectContext !== activeProjectContext) {
+      setActiveProjectContext(runtimeActiveProjectContext);
+      if (runtimeActiveProjectContext?.repo) {
+        addLog("info", `Contexto ativo identificado: ${runtimeActiveProjectContext.repo} (${runtimeActiveProjectContext.branch}).`);
+      }
+    }
 
     // Valida sessão
     if (supabaseClient) {
@@ -943,7 +1084,14 @@ ${errorNotice}` : errorNotice;
         content: m.content,
       }));
 
-      const agentHistory: AgentHistoryMessage[] = [...history, { role: "user", content: userContent }];
+      const sessionMemoryPrompt = formatActiveProjectContextForPrompt(runtimeActiveProjectContext);
+      const systemPromptWithSessionMemory = sessionMemoryPrompt
+        ? `${ZARITH_SYSTEM_PROMPT}\n\n${sessionMemoryPrompt}`
+        : ZARITH_SYSTEM_PROMPT;
+
+      const agentHistory: AgentHistoryMessage[] = sessionMemoryPrompt
+        ? [{ role: "system", content: sessionMemoryPrompt }, ...history, { role: "user", content: userContent }]
+        : [...history, { role: "user", content: userContent }];
 
       let lastError = "";
 
@@ -964,7 +1112,7 @@ ${errorNotice}` : errorNotice;
               body: JSON.stringify({
                 model: "llama-3.3-70b-versatile",
                 messages: [
-                  { role: "system", content: ZARITH_SYSTEM_PROMPT },
+                  { role: "system", content: systemPromptWithSessionMemory },
                   ...providerMessages,
                 ],
                 max_tokens: 2048,
@@ -988,7 +1136,7 @@ ${errorNotice}` : errorNotice;
               body: JSON.stringify({
                 model: "deepseek/deepseek-r1",
                 messages: [
-                  { role: "system", content: ZARITH_SYSTEM_PROMPT },
+                  { role: "system", content: systemPromptWithSessionMemory },
                   ...providerMessages,
                 ],
                 max_tokens: 2048,
@@ -1008,7 +1156,7 @@ ${errorNotice}` : errorNotice;
                 headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
                 signal,
                 body: JSON.stringify({
-                  systemInstruction: { parts: [{ text: ZARITH_SYSTEM_PROMPT }] },
+                  systemInstruction: { parts: [{ text: systemPromptWithSessionMemory }] },
                   contents: chatMessages.map(m => ({
                     role: m.role === "assistant" ? "model" : "user",
                     parts: [{ text: m.role === "tool" ? `Resultado da ferramenta ${m.name || "tool"}:\n${m.content}` : m.content }]
@@ -1034,7 +1182,7 @@ ${errorNotice}` : errorNotice;
               body: JSON.stringify({
                 model: "qwen/qwen3-coder",
                 messages: [
-                  { role: "system", content: ZARITH_SYSTEM_PROMPT },
+                  { role: "system", content: systemPromptWithSessionMemory },
                   ...providerMessages,
                 ],
                 max_tokens: 2048,
@@ -1057,7 +1205,7 @@ ${errorNotice}` : errorNotice;
               body: JSON.stringify({
                 model: "z-ai/glm-4-32b",
                 messages: [
-                  { role: "system", content: ZARITH_SYSTEM_PROMPT },
+                  { role: "system", content: systemPromptWithSessionMemory },
                   ...providerMessages,
                 ],
                 max_tokens: 2048,
@@ -1193,6 +1341,15 @@ ${errorNotice}` : errorNotice;
             });
           }
           break;
+        }
+
+        let inferredToolContext = runtimeActiveProjectContext;
+        for (const request of detectedToolRequests) {
+          inferredToolContext = inferActiveProjectContextFromToolRequest(request, inferredToolContext);
+        }
+        if (inferredToolContext !== runtimeActiveProjectContext) {
+          runtimeActiveProjectContext = inferredToolContext;
+          setActiveProjectContext(inferredToolContext);
         }
 
         const initialCalls: ToolCall[] = detectedToolRequests.map((tc) => ({
@@ -1375,7 +1532,7 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
       setCurrentToolName(null);
       abortControllerRef.current = null;
     }
-  }, [isLoading, activeModel, messages, currentSessionId, createNewSession, saveChatMessage, addLog, updateToolCall, requestDestructiveApproval, attachedImages, webSearchEnabled]);
+  }, [isLoading, activeModel, messages, currentSessionId, createNewSession, saveChatMessage, addLog, updateToolCall, requestDestructiveApproval, attachedImages, webSearchEnabled, activeProjectContext]);
 
   const handleImageUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
@@ -1629,6 +1786,38 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
                     Executar Agora
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Barra de contexto ativo */}
+        <AnimatePresence>
+          {activeProjectContext && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="border-b border-[#00f5ff]/20 bg-[#00f5ff]/10 overflow-hidden"
+            >
+              <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+                <div className="min-w-0 flex items-center gap-2 text-xs md:text-sm text-white/85">
+                  <span className="text-base" aria-hidden="true">📁</span>
+                  <span className="font-black text-[#00f5ff]">Projeto ativo:</span>
+                  <span className="truncate font-mono text-white">{activeProjectContext.repo}</span>
+                  <span className="text-white/35">|</span>
+                  <span className="shrink-0">branch: <span className="font-mono text-white">{activeProjectContext.branch}</span></span>
+                  <span className="text-white/35">|</span>
+                  <span className="shrink-0 font-bold text-white/75">{activeProjectContext.stack}</span>
+                </div>
+                <button
+                  onClick={clearActiveProjectContext}
+                  className="shrink-0 rounded-full border border-white/10 bg-white/5 p-1.5 text-white/60 transition-all hover:bg-white/10 hover:text-white"
+                  title="Limpar contexto ativo"
+                  aria-label="Limpar contexto ativo"
+                >
+                  <X size={14} />
+                </button>
               </div>
             </motion.div>
           )}
