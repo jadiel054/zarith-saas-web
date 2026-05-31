@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import {
   Send,
   Copy,
@@ -904,18 +905,21 @@ ${executedToolCalls.map(call => {
   const res = call.result;
   if (call.name === "github/list-repos" && Array.isArray(res)) {
     return `### 📂 Repositórios Encontrados\n\n${res.map((r: any) => `
-<details className="mb-2 border border-[var(--border-glow)] rounded-xl overflow-hidden bg-black/20">
-  <summary className="p-3 cursor-pointer hover:bg-white/5 font-bold flex items-center gap-2">
-    <span className="text-[#00f5ff]">▶</span> ${r.name} <span className="text-[10px] opacity-50 uppercase ml-2">(${r.language} • ${r.visibility})</span>
-  </summary>
-  <div className="p-3 border-t border-[var(--border-glow)] text-xs space-y-2">
-    <p className="text-[var(--text-secondary)]">${r.description}</p>
-    <div className="flex gap-4">
-      <a href="${r.url}" target="_blank" className="text-[#00f5ff] hover:underline">Ver no GitHub</a>
-      <span className="text-white/30">Atualizado em: ${new Date(r.updated_at).toLocaleDateString()}</span>
+<div style="margin-bottom: 8px; border: 1px solid rgba(0, 245, 255, 0.2); border-radius: 12px; overflow: hidden; background: rgba(0, 0, 0, 0.2);">
+  <details>
+    <summary style="padding: 12px; cursor: pointer; list-style: none; font-weight: bold; display: flex; align-items: center; gap: 8px; background: rgba(255, 255, 255, 0.02);">
+      <span style="color: #00f5ff;">▶</span> ${r.name} 
+      <span style="font-size: 10px; opacity: 0.5; text-transform: uppercase; margin-left: 8px;">(${r.language} • ${r.visibility})</span>
+    </summary>
+    <div style="padding: 12px; border-top: 1px solid rgba(255, 255, 255, 0.05); font-size: 12px; line-height: 1.6;">
+      <p style="color: rgba(255, 255, 255, 0.7); margin-bottom: 8px;">${r.description}</p>
+      <div style="display: flex; gap: 16px; align-items: center;">
+        <a href="${r.url}" target="_blank" style="color: #00f5ff; text-decoration: none; font-weight: bold;">Ver no GitHub</a>
+        <span style="color: rgba(255, 255, 255, 0.3); font-size: 10px;">Atualizado em: ${new Date(r.updated_at).toLocaleDateString()}</span>
+      </div>
     </div>
-  </div>
-</details>`).join("")}`;
+  </details>
+</div>`).join("")}`;
   }
   
   if (call.name === "github/read-file") {
@@ -1289,7 +1293,10 @@ ${executedToolCalls.map(call => {
                           }`}
                         >
                           <div className="prose prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            <ReactMarkdown 
+                              remarkPlugins={[remarkGfm]} 
+                              rehypePlugins={[rehypeRaw]}
+                            >
                               {message.content}
                             </ReactMarkdown>
                           </div>
