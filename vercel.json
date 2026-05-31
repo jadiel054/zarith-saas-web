@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "pnpm --config.verify-deps-before-run=false --filter @workspace/api-server run build && pnpm --config.verify-deps-before-run=false --filter @workspace/zarith run build",
+  "buildCommand": "pnpm --config.verify-deps-before-run=false --filter @workspace/zarith run build",
   "outputDirectory": "artifacts/zarith/dist/public",
   "installCommand": "pnpm install --ignore-scripts",
   "framework": null,
