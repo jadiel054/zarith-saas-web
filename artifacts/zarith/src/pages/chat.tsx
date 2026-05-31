@@ -200,7 +200,16 @@ REGRAS DE SEGURANÇA
   GitHub Token: ghp_xxxxxxxxxxxx (precisar de permissão: repo, workflow)
   Vercel Token: xxxxxxxxxxxxxxxx
   Supabase URL: https://xxxx.supabase.co
-  Supabase Service Role Key: eyJ...`;
+  Supabase Service Role Key: eyJ...
+
+═══════════════════════════════════════
+REGRAS DE APRESENTAÇÃO DE RESULTADOS
+═══════════════════════════════════════
+- SEMPRE apresente resultados de ferramentas em formato Markdown organizado.
+- NUNCA exiba JSON cru para o usuário.
+- Para listas de repositórios, use tabelas: **Nome** | Linguagem | Visibilidade | Link.
+- Para conteúdos de arquivos, use blocos de código com a linguagem correta.
+- Para erros, use citações em vermelho ou blocos de aviso legíveis.`;
 
 // ── Modelos ───────────────────────────────────────────────────────────────────
 
@@ -863,10 +872,35 @@ export default function ChatPage() {
 
 ---
 **Resultados das ferramentas executadas:**
+Aqui estão os dados que eu trouxe pra você, Jadiel. Nada de JSON cru, bora pro que interessa:
 
-\`\`\`json
-${JSON.stringify(toolContext, null, 2)}
-\`\`\``;
+${executedToolCalls.map(call => {
+  if (call.status === "error") return `❌ **Erro em ${call.name}**: ${call.result?.error || 'Erro desconhecido'}`;
+  
+  const res = call.result;
+  if (call.name === "github/list-repos" && Array.isArray(res)) {
+    const table = "| **Nome** | Linguagem | Visibilidade | Link |\n| :--- | :--- | :--- | :--- |\n" + 
+      res.slice(0, 10).map((r: any) => `| **${r.name}** | ${r.language || 'N/A'} | ${r.private ? 'Privado' : 'Público'} | [Ver](${r.html_url})`).join("\n");
+    return `### 📂 Repositórios Encontrados\n${table}${res.length > 10 ? `\n\n*...e mais ${res.length - 10} repositórios.*` : ""}`;
+  }
+  
+  if (call.name === "github/read-file") {
+    return `### 📄 Arquivo: ${call.args?.path}\n\`\`\`${call.args?.path?.split('.').pop() || ''}\n${res.content || res}\n\`\`\``;
+  }
+
+  if (call.name === "vercel/list-projects" && Array.isArray(res?.projects)) {
+    const table = "| **Projeto** | Framework | Último Deploy | Link |\n| :--- | :--- | :--- | :--- |\n" + 
+      res.projects.slice(0, 10).map((p: any) => `| **${p.name}** | ${p.framework || 'N/A'} | ${new Date(p.updatedAt).toLocaleDateString()} | [Link](https://${p.link})`).join("\n");
+    return `### 🚀 Projetos na Vercel\n${table}`;
+  }
+
+  if (call.name === "supabase/list-tables" && Array.isArray(res)) {
+    return `### 🗄️ Tabelas no Supabase\n${res.map((t: any) => `- **${t.table_name}** (${t.table_schema})`).join("\n")}`;
+  }
+
+  return `✅ **${call.name} executado:**\n\`\`\`json\n${JSON.stringify(res, null, 2)}\n\`\`\``;
+}).join("\n\n")}
+`;
         finalContent += toolSummary;
 
         setMessages((prev) => {
