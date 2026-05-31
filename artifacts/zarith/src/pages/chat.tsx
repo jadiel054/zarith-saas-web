@@ -409,8 +409,22 @@ async function executeToolCall(
       throw new Error(JSON.stringify(result));
     }
 
+    // Pré-processamento REAL dos dados antes de salvar no estado
+    let finalResult = result;
+    if (normalizedName === "github/list-repos" && Array.isArray(result)) {
+      finalResult = result.map((repo: any) => ({
+        name: repo.name,
+        description: repo.description || "Sem descrição",
+        language: repo.language || "N/A",
+        visibility: repo.private ? "privado" : "público",
+        url: repo.html_url,
+        updated_at: repo.updated_at
+      }));
+      addLog('info', `Filtrados ${result.length} repositórios para o contexto da IA.`);
+    }
+
     toolCallState.status = "success";
-    toolCallState.result = result;
+    toolCallState.result = finalResult;
     onToolCallUpdate(toolCallState);
     addLog('success', `Ferramenta ${normalizedName} executada com sucesso`);
 
@@ -864,13 +878,13 @@ export default function ChatPage() {
           ));
         }
 
-        // Pré-processamento simplificado para o contexto do modelo (evitar JSON gigante)
+        // O resultado já vem pré-processado do executeToolCall
         const simplifiedToolResults = executedToolCalls.map(call => {
           if (call.status === "error") return `Erro em ${call.name}: ${call.result?.error || 'Erro desconhecido'}`;
           
           const res = call.result;
           if (call.name === "github/list-repos" && Array.isArray(res)) {
-            return `Repositórios encontrados:\n${res.map((r: any) => `- ${r.name} | ${r.language || 'N/A'} | ${r.private ? 'Privado' : 'Público'} | ${r.html_url}`).join("\n")}`;
+            return `Repositórios encontrados:\n${res.map((r: any) => `- ${r.name} | ${r.language} | ${r.visibility} | ${r.url}`).join("\n")}`;
           }
           if (call.name === "github/read-file") {
             return `Conteúdo de ${call.args?.path}:\n${res.content || res}`;
@@ -889,9 +903,19 @@ ${executedToolCalls.map(call => {
   
   const res = call.result;
   if (call.name === "github/list-repos" && Array.isArray(res)) {
-    const table = "| **Nome** | Linguagem | Visibilidade | Link |\n| :--- | :--- | :--- | :--- |\n" + 
-      res.slice(0, 20).map((r: any) => `| **${r.name}** | ${r.language || 'N/A'} | ${r.private ? 'Privado' : 'Público'} | [Ver](${r.html_url})`).join("\n");
-    return `### 📂 Repositórios Encontrados\n${table}${res.length > 20 ? `\n\n*...e mais ${res.length - 20} repositórios.*` : ""}`;
+    return `### 📂 Repositórios Encontrados\n\n${res.map((r: any) => `
+<details className="mb-2 border border-[var(--border-glow)] rounded-xl overflow-hidden bg-black/20">
+  <summary className="p-3 cursor-pointer hover:bg-white/5 font-bold flex items-center gap-2">
+    <span className="text-[#00f5ff]">▶</span> ${r.name} <span className="text-[10px] opacity-50 uppercase ml-2">(${r.language} • ${r.visibility})</span>
+  </summary>
+  <div className="p-3 border-t border-[var(--border-glow)] text-xs space-y-2">
+    <p className="text-[var(--text-secondary)]">${r.description}</p>
+    <div className="flex gap-4">
+      <a href="${r.url}" target="_blank" className="text-[#00f5ff] hover:underline">Ver no GitHub</a>
+      <span className="text-white/30">Atualizado em: ${new Date(r.updated_at).toLocaleDateString()}</span>
+    </div>
+  </div>
+</details>`).join("")}`;
   }
   
   if (call.name === "github/read-file") {
