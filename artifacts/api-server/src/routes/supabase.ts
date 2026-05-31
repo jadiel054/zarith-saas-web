@@ -8,7 +8,7 @@ function dangerousSql(sql: string) {
   return /\b(drop\s+table|truncate|delete\s+from)\b/i.test(sql);
 }
 
-function requiredEnv(name: "SUPABASE_URL" | "SUPABASE_SERVICE_ROLE_KEY" | "SUPABASE_ACCESS_TOKEN") {
+function requiredEnv(name: "SUPABASE_URL" | "SUPABASE_SERVICE_ROLE_KEY") {
   const value = (process.env[name] || "").trim();
   if (!value) {
     throw Object.assign(new Error(`${name} não configurada no servidor.`), { statusCode: 401 });
@@ -22,29 +22,6 @@ function getSupabaseUrl() {
 
 function getSupabaseServiceRoleKey() {
   return requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
-}
-
-function getSupabaseAccessToken() {
-  return requiredEnv("SUPABASE_ACCESS_TOKEN");
-}
-
-function getProjectRef() {
-  const supabaseUrl = getSupabaseUrl();
-  try {
-    const hostname = new URL(supabaseUrl).hostname;
-    const [projectRef] = hostname.split(".");
-
-    if (!projectRef || projectRef === "supabase") {
-      throw new Error("Project ref ausente no hostname.");
-    }
-
-    return projectRef;
-  } catch (error) {
-    throw Object.assign(new Error(`SUPABASE_URL inválida para extrair projectRef: ${supabaseUrl}`), {
-      statusCode: 500,
-      data: error,
-    });
-  }
 }
 
 function getSupabaseClient(): SupabaseClient {
@@ -76,35 +53,18 @@ async function executeSql(sql: string, params: any[] = []) {
 }
 
 async function listTables() {
-  const projectRef = getProjectRef();
-  const accessToken = getSupabaseAccessToken();
-  const response = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/database/tables`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json",
-    },
-  });
+  const { data, error } = await getSupabaseClient()
+    .from("information_schema.tables")
+    .select("table_name, table_schema")
+    .neq("table_schema", "pg_catalog")
+    .neq("table_schema", "information_schema")
+    .order("table_schema", { ascending: true })
+    .order("table_name", { ascending: true });
 
-  const text = await response.text();
-  let data: unknown = text;
-
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = text;
-    }
-  }
-
-  if (!response.ok) {
-    const message = typeof data === "object" && data && "message" in data
-      ? String((data as { message: unknown }).message)
-      : `Supabase Management API retornou HTTP ${response.status}.`;
-
-    throw Object.assign(new Error(message), {
-      statusCode: response.status,
-      data,
+  if (error) {
+    throw Object.assign(new Error(error.message), {
+      statusCode: Number(error.code) || 500,
+      data: error,
     });
   }
 

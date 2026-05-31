@@ -203,7 +203,7 @@ REGRAS DE SEGURANÇA
 - Ao precisar de credencial não disponível, solicite no formato exato:
   GitHub Token: ghp_xxxxxxxxxxxx (precisar de permissão: repo, workflow)
   Vercel Token: xxxxxxxxxxxxxxxx
-- Para Supabase, NÃO solicite nem envie URL ou Service Role Key pelo frontend. O backend usa as variáveis de ambiente SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY configuradas no servidor.
+- Para Supabase, NÃO solicite nem envie URL, chave, token ou qualquer credencial pelo frontend. As integrações Supabase usam credenciais configuradas exclusivamente no backend.
 
 ═══════════════════════════════════════
 REGRAS DE APRESENTAÇÃO DE RESULTADOS
@@ -312,8 +312,21 @@ function normalizeToolName(name: string): string {
 }
 
 function sanitizeSupabaseArgs(args: any = {}) {
-  const { url: _url, supabaseUrl: _supabaseUrl, SUPABASE_URL: _SUPABASE_URL, key: _key, serviceRoleKey: _serviceRoleKey, service_role_key: _serviceRoleKeySnake, SUPABASE_SERVICE_ROLE_KEY: _SUPABASE_SERVICE_ROLE_KEY, ...safeArgs } = args || {};
-  return safeArgs;
+  if (!args || typeof args !== "object" || Array.isArray(args)) return {};
+
+  return Object.fromEntries(
+    Object.entries(args).filter(([key]) => {
+      const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const isCredentialKey =
+        normalizedKey.includes("url") ||
+        normalizedKey.includes("key") ||
+        normalizedKey.includes("token") ||
+        normalizedKey.includes("secret") ||
+        normalizedKey.includes("credential");
+
+      return !isCredentialKey;
+    })
+  );
 }
 
 function parseToolCallsFromText(text: string): ToolCallRequest[] {
@@ -331,7 +344,10 @@ function parseToolCallsFromText(text: string): ToolCallRequest[] {
         const list = Array.isArray(parsed) ? parsed : [parsed];
         for (const item of list) {
           const name = normalizeToolName(item.name || item.tool || item.action);
-          if (name) calls.push({ name, args: item.args || item.params || item.arguments || item.payload || {} });
+          if (name) {
+            const rawArgs = item.args || item.params || item.arguments || item.payload || {};
+            calls.push({ name, args: name.startsWith("supabase/") ? sanitizeSupabaseArgs(rawArgs) : rawArgs });
+          }
         }
       } catch (error) {
         console.error("Erro ao parsear tool call:", error);
