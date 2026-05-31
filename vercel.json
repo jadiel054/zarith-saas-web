@@ -8,11 +8,6 @@
     "BASE_PATH": "/",
     "NODE_ENV": "production"
   },
-  "functions": {
-    "api/index.ts": {
-      "runtime": "vercel-node@latest"
-    }
-  },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" },
     { "source": "/(.*)", "destination": "/index.html" }
