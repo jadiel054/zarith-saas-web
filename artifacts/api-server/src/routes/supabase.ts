@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { createClient } from "@supabase/supabase-js";
 import { boolConfirmed, getBody, providerFetch, required, sendError, supabaseCreds, supabaseHeaders } from "./toolUtils";
 
 const router = Router();
@@ -16,6 +17,31 @@ async function executeSql(req: Request, sql: string, params: any[] = []) {
   }, "Supabase");
 }
 
+const LIST_TABLES_SQL = `SELECT table_name, table_schema 
+FROM information_schema.tables 
+WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+ORDER BY table_schema, table_name;`;
+
+async function listTables(req: Request) {
+  const { url, key } = supabaseCreds(req);
+  const supabase = createClient(url, key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+
+  const { data, error } = await supabase.rpc("execute_sql", {
+    query: LIST_TABLES_SQL,
+  });
+
+  if (error) {
+    throw Object.assign(new Error(error.message), { statusCode: Number(error.code) || 500, data: error });
+  }
+
+  return data;
+}
+
 router.post(["/execute-sql", "/execute"], async (req: Request, res: Response) => {
   try {
     const body = getBody(req); const sql = required(body.sql || body.query, "sql");
@@ -28,17 +54,14 @@ router.post(["/execute-sql", "/execute"], async (req: Request, res: Response) =>
 
 router.post(["/list-tables", "/tables"], async (req: Request, res: Response) => {
   try {
-    const schema = getBody(req).schema || "public";
-    const sql = `select table_schema, table_name, table_type from information_schema.tables where table_schema = '${String(schema).replace(/'/g, "''")}' order by table_name`;
-    return res.json({ success: true, data: await executeSql(req, sql) });
+    return res.json({ success: true, data: await listTables(req) });
   } catch (error) { return sendError(res, error, "Não foi possível listar tabelas."); }
 });
 
 router.get("/tables", async (req: Request, res: Response) => {
   req.body = { ...req.query, ...req.body };
   try {
-    const sql = "select table_schema, table_name, table_type from information_schema.tables where table_schema = 'public' order by table_name";
-    return res.json({ success: true, data: await executeSql(req, sql) });
+    return res.json({ success: true, data: await listTables(req) });
   } catch (error) { return sendError(res, error, "Não foi possível listar tabelas."); }
 });
 
