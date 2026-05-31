@@ -509,32 +509,35 @@ export default function SettingsPage() {
       </AnimatePresence>
 
       {/* ── Header ── */}
-      <header className="h-16 border-b border-[var(--border-glow)] flex items-center px-6 bg-[var(--bg-secondary)] gap-4 shrink-0">
-        <Link href="/chat" className="p-2 hover:bg-[var(--bg-card-hover)] rounded-lg text-[var(--accent-cyan)] transition-all">
+      <header className="h-16 sm:h-[72px] border-b border-[var(--border-glow)] flex items-center px-3 sm:px-6 bg-[var(--bg-secondary)] gap-3 sm:gap-4 shrink-0">
+        <Link href="/chat" className="p-2 hover:bg-[var(--bg-card-hover)] rounded-lg text-[var(--accent-cyan)] transition-all shrink-0">
           <ChevronLeft size={20} />
         </Link>
-        <h1 className="font-orbitron font-black text-xl tracking-widest">CONFIGURAÇÕES</h1>
+        <h1 className="font-orbitron font-black text-lg sm:text-xl tracking-[0.18em] sm:tracking-widest truncate">CONFIGURAÇÕES</h1>
       </header>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
 
-        {/* ── Sidebar de abas ── */}
-        <aside className="w-56 border-r border-[var(--border-glow)] bg-[var(--bg-secondary)] p-4 space-y-2 shrink-0">
-          {tabs.map((tab) => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-all ${
-                activeTab === tab.id
-                  ? "bg-gradient-to-r from-[var(--accent-cyan)]/20 to-[var(--accent-purple)]/20 text-[var(--accent-cyan)] border border-[var(--accent-cyan)]/30"
-                  : "text-[var(--text-secondary)] hover:bg-[var(--bg-card-hover)] hover:text-[var(--text-primary)]"
-              }`}>
-              {tab.icon}{tab.label}
-            </button>
-          ))}
+        {/* ── Navegação de abas ── */}
+        <aside className="w-full md:w-56 border-b md:border-b-0 md:border-r border-[var(--border-glow)] bg-[var(--bg-secondary)] p-3 md:p-4 shrink-0">
+          <div className="flex md:block gap-2 md:space-y-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {tabs.map((tab) => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                className={`flex-1 md:w-full min-w-[108px] md:min-w-0 flex flex-col sm:flex-row md:flex-row items-center justify-center md:justify-start gap-1.5 sm:gap-2 md:gap-3 px-2 sm:px-4 py-2.5 md:py-3 rounded-xl font-bold text-[11px] sm:text-sm transition-all ${
+                  activeTab === tab.id
+                    ? "bg-gradient-to-r from-[var(--accent-cyan)]/20 to-[var(--accent-purple)]/20 text-[var(--accent-cyan)] border border-[var(--accent-cyan)]/30 shadow-[0_0_24px_rgba(0,245,255,0.08)]"
+                    : "text-[var(--text-secondary)] border border-transparent hover:bg-[var(--bg-card-hover)] hover:text-[var(--text-primary)]"
+                }`}>
+                <span className="shrink-0">{tab.icon}</span>
+                <span className="truncate">{tab.label}</span>
+              </button>
+            ))}
+          </div>
         </aside>
 
         {/* ── Conteúdo ── */}
-        <main className="flex-1 overflow-y-auto p-8">
-          <div className="max-w-3xl mx-auto">
+        <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8">
+          <div className="w-full max-w-3xl mx-auto">
             <AnimatePresence mode="wait">
               <motion.div key={activeTab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.15 }}>
 
@@ -543,7 +546,7 @@ export default function SettingsPage() {
                   <div className="space-y-8">
                     <h2 className="text-xl font-orbitron font-bold text-[var(--accent-cyan)]">PERFIL</h2>
 
-                    <div className="flex items-center gap-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-5 sm:gap-6">
                       <div className="relative group shrink-0">
                         <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-[var(--accent-cyan)] to-[var(--accent-purple)] flex items-center justify-center glow-cyan overflow-hidden">
                           {uploadingAvatar ? <Loader2 size={28} className="text-white animate-spin" />
@@ -565,12 +568,12 @@ export default function SettingsPage() {
 
                       <div className="space-y-2 flex-1">
                         <label className="text-xs font-bold text-[var(--text-secondary)] uppercase">Nome de Exibição</label>
-                        <div className="flex gap-2">
+                        <div className="flex flex-col sm:flex-row gap-2">
                           <input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)}
                             onKeyDown={(e) => e.key === "Enter" && handleSaveName()}
                             className="flex-1 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-lg px-4 py-2 text-sm focus:border-[var(--accent-cyan)] outline-none transition-colors" />
                           <button onClick={handleSaveName} disabled={savingName || !displayName.trim()}
-                            className="px-4 py-2 bg-[var(--accent-cyan)] text-[var(--bg-primary)] font-bold rounded-lg text-sm hover:brightness-110 transition-all disabled:opacity-60 flex items-center gap-2 min-w-[90px] justify-center">
+                            className="w-full sm:w-auto px-4 py-2 bg-[var(--accent-cyan)] text-[var(--bg-primary)] font-bold rounded-lg text-sm hover:brightness-110 transition-all disabled:opacity-60 flex items-center gap-2 min-w-[90px] justify-center">
                             {savingName ? <><Loader2 size={14} className="animate-spin" /> Salvando</> : "Salvar"}
                           </button>
                         </div>
@@ -578,15 +581,15 @@ export default function SettingsPage() {
                       </div>
                     </div>
 
-                    <div className="p-6 bg-[var(--bg-card)] rounded-2xl border border-[var(--border-glow)]">
-                      <div className="flex justify-between items-center">
+                    <div className="p-4 sm:p-6 bg-[var(--bg-card)] rounded-2xl border border-[var(--border-glow)]">
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
                         <div>
                           <p className="text-xs font-bold text-[var(--text-secondary)] uppercase">Email</p>
                           <p className="text-sm font-mono">{user?.email || "—"}</p>
                         </div>
-                        <div className="text-right">
+                        <div className="sm:text-right">
                           <p className="text-xs font-bold text-[var(--text-secondary)] uppercase">Status</p>
-                          <p className="text-sm flex items-center gap-2 justify-end">
+                          <p className="text-sm flex items-center gap-2 sm:justify-end">
                             Verificado <CheckCircle2 size={14} className="text-[var(--accent-green)]" />
                           </p>
                         </div>
@@ -598,12 +601,10 @@ export default function SettingsPage() {
                 {/* ── API KEYS ── */}
                 {activeTab === "api" && (
                   <div className="space-y-6">
-                    <div>
+                    <div className="rounded-2xl border border-[var(--border-glow)] bg-[var(--bg-card)]/50 p-4 sm:p-5">
                       <h2 className="text-xl font-orbitron font-bold text-[var(--accent-cyan)]">API KEYS</h2>
-                      <p className="text-xs text-[var(--text-secondary)] mt-1">
-                        Clique em <span className="text-[var(--accent-cyan)] font-bold">Testar & Salvar</span> para validar a chave com uma chamada real à API antes de salvar.
-                        Clique em <span className="text-[var(--text-secondary)] font-bold">Salvar</span> para salvar sem testar.
-                        As chaves ficam armazenadas localmente no seu navegador.
+                      <p className="text-sm sm:text-xs leading-relaxed text-[var(--text-secondary)] mt-2 max-w-2xl">
+                        Use <span className="text-[var(--accent-cyan)] font-bold">Testar & Salvar</span> para validar a chave com uma chamada real à API antes de salvar, ou <span className="text-[var(--text-secondary)] font-bold">Salvar</span> para armazenar sem testar. As chaves ficam guardadas localmente neste navegador.
                       </p>
                     </div>
 
@@ -615,7 +616,7 @@ export default function SettingsPage() {
 
                       return (
                         <div key={name}
-                          className={`p-6 bg-[var(--bg-card)] border rounded-2xl space-y-4 transition-all ${
+                          className={`p-4 sm:p-6 bg-[var(--bg-card)] border rounded-2xl space-y-4 transition-all min-w-0 ${
                             status === "valid"   ? "border-[var(--accent-green)]/50"
                             : status === "invalid" ? "border-[var(--accent-pink)]/50"
                             : status === "saved"   ? "border-[var(--accent-cyan)]/40"
@@ -623,10 +624,10 @@ export default function SettingsPage() {
                           }`}>
 
                           {/* Cabeçalho do card */}
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <p className="font-bold text-sm">{name}</p>
+                          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="font-bold text-sm break-words">{name}</p>
                                 {/* Badge de status */}
                                 {status === "valid" && (
                                   <span className="flex items-center gap-1 text-[10px] font-bold text-[var(--accent-green)] bg-[var(--accent-green)]/10 px-2 py-0.5 rounded-full">
@@ -654,22 +655,22 @@ export default function SettingsPage() {
                                   </span>
                                 )}
                               </div>
-                              <p className="text-[10px] text-[var(--text-secondary)] mt-0.5">{description}</p>
+                              <p className="text-xs sm:text-[10px] text-[var(--text-secondary)] mt-1 leading-relaxed">{description}</p>
                             </div>
 
                             {/* Botão remover chave */}
                             {isStored && (
                               <button onClick={() => handleRemoveKey(name)}
                                 title="Remover chave salva"
-                                className="text-[var(--text-secondary)] hover:text-[var(--accent-pink)] transition-colors p-1">
+                                className="self-start sm:self-auto text-[var(--text-secondary)] hover:text-[var(--accent-pink)] transition-colors p-1">
                                 <Trash2 size={14} />
                               </button>
                             )}
                           </div>
 
                           {/* Input da chave */}
-                          <div className="flex gap-2">
-                            <div className="relative flex-1">
+                          <div className="flex flex-col gap-3">
+                            <div className="relative w-full min-w-0">
                               <input
                                 type={showKeys[name] ? "text" : "password"}
                                 value={keyValues[name] || ""}
@@ -680,7 +681,7 @@ export default function SettingsPage() {
                                 }}
                                 placeholder={isStored ? "••••••••••••••••  (chave salva)" : placeholder}
                                 disabled={isWorking}
-                                className={`w-full bg-[var(--bg-primary)] border rounded-lg px-4 py-2.5 text-sm outline-none font-mono pr-10 transition-colors disabled:opacity-60 ${
+                                className={`w-full min-w-0 bg-[var(--bg-primary)] border rounded-lg px-4 py-3 text-sm outline-none font-mono pr-11 transition-colors disabled:opacity-60 ${
                                   status === "invalid" ? "border-[var(--accent-pink)]/50 focus:border-[var(--accent-pink)]"
                                   : "border-[var(--border-glow)] focus:border-[var(--accent-cyan)]"
                                 }`}
@@ -692,13 +693,13 @@ export default function SettingsPage() {
                             </div>
 
                             {/* Botões de ação */}
-                            <div className="flex gap-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
                               {/* Testar & Salvar */}
                               <button
                                 onClick={() => handleTestKey(name)}
                                 disabled={isWorking || (!keyValues[name]?.trim() && !isStored)}
                                 title="Valida a chave com uma chamada real à API e salva se válida"
-                                className="flex items-center gap-1.5 px-3 py-2.5 bg-[var(--accent-cyan)]/10 border border-[var(--accent-cyan)]/30 text-[var(--accent-cyan)] font-bold rounded-lg text-xs hover:bg-[var(--accent-cyan)]/20 transition-all disabled:opacity-40 whitespace-nowrap"
+                                className="w-full flex items-center justify-center gap-1.5 px-3 py-3 bg-[var(--accent-cyan)]/10 border border-[var(--accent-cyan)]/30 text-[var(--accent-cyan)] font-bold rounded-lg text-xs hover:bg-[var(--accent-cyan)]/20 transition-all disabled:opacity-40 whitespace-nowrap"
                               >
                                 {status === "testing"
                                   ? <><Loader2 size={13} className="animate-spin" /> Testando</>
@@ -711,7 +712,7 @@ export default function SettingsPage() {
                                 onClick={() => handleSaveKey(name)}
                                 disabled={isWorking || !keyValues[name]?.trim()}
                                 title="Salva a chave sem validar"
-                                className="flex items-center gap-1.5 px-3 py-2.5 bg-[var(--bg-secondary)] border border-[var(--border-glow)] text-[var(--text-secondary)] font-bold rounded-lg text-xs hover:border-[var(--accent-cyan)] hover:text-[var(--accent-cyan)] transition-all disabled:opacity-40 whitespace-nowrap"
+                                className="w-full flex items-center justify-center gap-1.5 px-3 py-3 bg-[var(--bg-secondary)] border border-[var(--border-glow)] text-[var(--text-secondary)] font-bold rounded-lg text-xs hover:border-[var(--accent-cyan)] hover:text-[var(--accent-cyan)] transition-all disabled:opacity-40 whitespace-nowrap"
                               >
                                 {status === "saving"
                                   ? <><Loader2 size={13} className="animate-spin" /> Salvando</>
@@ -746,20 +747,20 @@ export default function SettingsPage() {
                   <div className="space-y-6">
                     <h2 className="text-xl font-orbitron font-bold text-[var(--accent-cyan)]">SESSÃO</h2>
 
-                    <div className="p-6 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl space-y-4">
+                    <div className="p-4 sm:p-6 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-2xl space-y-4">
                       <div>
                         <p className="text-sm font-bold">Sessão ativa</p>
                         <p className="text-xs text-[var(--text-secondary)] mt-1">
-                          Logado como <span className="font-mono text-[var(--text-primary)]">{user?.email || "—"}</span>
+                          Logado como <span className="font-mono text-[var(--text-primary)] break-all">{user?.email || "—"}</span>
                         </p>
                       </div>
                       <button onClick={handleLogout}
-                        className="flex items-center gap-2 px-6 py-3 bg-[var(--accent-pink)]/10 border border-[var(--accent-pink)]/30 text-[var(--accent-pink)] rounded-xl font-bold hover:bg-[var(--accent-pink)]/20 transition-all">
+                        className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-[var(--accent-pink)]/10 border border-[var(--accent-pink)]/30 text-[var(--accent-pink)] rounded-xl font-bold hover:bg-[var(--accent-pink)]/20 transition-all">
                         <LogOut size={18} /> Encerrar Sessão
                       </button>
                     </div>
 
-                    <div className="p-6 bg-[var(--bg-card)] border border-red-500/20 rounded-2xl space-y-4">
+                    <div className="p-4 sm:p-6 bg-[var(--bg-card)] border border-red-500/20 rounded-2xl space-y-4">
                       <div>
                         <h3 className="font-orbitron font-bold text-red-400 text-sm mb-1">ZONA DE PERIGO</h3>
                         <p className="text-sm text-[var(--text-secondary)]">
@@ -767,7 +768,7 @@ export default function SettingsPage() {
                         </p>
                       </div>
                       <button onClick={() => setShowDeleteModal(true)}
-                        className="flex items-center gap-2 px-6 py-3 bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl font-bold hover:bg-red-500/20 transition-all text-sm">
+                        className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl font-bold hover:bg-red-500/20 transition-all text-sm">
                         <Trash2 size={18} /> Excluir conta e dados locais
                       </button>
                     </div>
