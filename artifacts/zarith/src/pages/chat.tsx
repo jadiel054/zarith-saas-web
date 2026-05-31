@@ -379,11 +379,12 @@ async function executeToolCall(
 
     const [namespace, ...actionParts] = normalizedName.split('/');
     const action = actionParts.join('/');
+    const apiBase = "https://zarith-api-server.onrender.com";
     const endpoint = namespace === "deploy" ? "/api/deploy" : `/api/${namespace}/${action}`;
     const payload = { ...getToolCredentials(namespace), ...(toolCall.args || {}) };
 
     // Garantir que o método seja SEMPRE POST para evitar HTTP 405
-    const response = await fetch(`${window.location.origin}${endpoint}`, {
+    const response = await fetch(`${apiBase}${endpoint}`, {
       method: "POST",
       headers: { 
         "Content-Type": "application/json",
