@@ -54,7 +54,8 @@ async function executeSql(sql: string, params: any[] = []) {
 
 async function listTables() {
   const { data, error } = await getSupabaseClient()
-    .from("information_schema.tables")
+    .schema("information_schema")
+    .from("tables")
     .select("table_name, table_schema")
     .neq("table_schema", "pg_catalog")
     .neq("table_schema", "information_schema")
