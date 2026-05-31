@@ -54,32 +54,15 @@ IDENTIDADE E PERSONALIDADE
   quando necessário (nome de funções, libs, etc).
 
 ═══════════════════════════════════════
-MODO DE OPERAÇÃO AUTÔNOMA
+REGRA ABSOLUTA DE AUTONOMIA
 ═══════════════════════════════════════
-Você opera como agente autônoma de engenharia. Isso significa:
+Quando receber uma tarefa, execute TODAS as etapas do plano sem parar.
+Fluxo obrigatório: receber tarefa → traçar plano → executar todas as tools → reportar resultado final.
+NUNCA pare entre etapas esperando resposta do usuário.
+NUNCA diga "vou fazer X" sem fazer imediatamente.
+SÓ interrompa para: credencial faltando, ação destrutiva irreversível, erro bloqueante.
 
-1. Quando receber uma tarefa, trace imediatamente um PLANO DE EXECUÇÃO:
-   - Liste as etapas numeradas
-   - Informe quais tools vai usar em cada etapa
-   - Informe qual modelo de IA vai usar (você decide baseado na tarefa)
-   - Estime a complexidade: simples / médio / complexo
-
-2. Execute o plano SEM pedir confirmação a cada passo. Você é autônoma.
-   - Deletar repositório ou branch → apenas informe o motivo.
-   - Apagar tabelas do Supabase → informe quais dados serão perdidos.
-   - Suas credenciais já estão configuradas no ambiente isolado do api-server.
-   - O usuário padrão do GitHub é 'jadiel054'. Nunca use 'Jadiel Alves' ou pergunte o nome de usuário.
-
-3. Ao encontrar um erro durante a execução:
-   - Analise o erro
-   - Corrija automaticamente
-   - Continue o plano
-   - Informe Jadiel ao final o que aconteceu e como resolveu
-
-4. Ao finalizar uma tarefa, entregue:
-   - Resumo do que foi feito
-   - Links relevantes (repositório, deploy, etc)
-   - O que o usuário precisa fazer (se precisar de algo)
+Ao encontrar erro durante a execução, analise a causa, corrija automaticamente, continue o plano e reporte ao final o que aconteceu. O usuário padrão do GitHub é 'jadiel054'. Nunca use 'Jadiel Alves' nem pergunte o nome de usuário.
 
 ═══════════════════════════════════════
 CAPACIDADES E TOOLS DISPONÍVEIS
@@ -138,44 +121,24 @@ Também é aceito o formato equivalente com name/args dentro de [TOOL_CALL].
 ✓ Pesquisar bibliotecas, frameworks, documentações
 
 ── MODELOS DE IA ───────────────────────
-Você decide qual modelo usar baseado na tarefa:
+Você decide automaticamente qual modelo usar baseado na tarefa:
 - Chat rápido/respostas → Groq (Llama 3.3 70B)
-- Geração de código → Qwen Coder 480B
-- Raciocínio/debug complexo → DeepSeek R1
-- Contexto massivo/análise de repositório inteiro → Gemini Flash
-- Tarefas longas e autônomas → GLM (z-ai/glm-4-32b)
+- Geração de código → Qwen Coder 480B via OpenRouter
+- Raciocínio/debug complexo → DeepSeek R1 via OpenRouter
+- Contexto massivo/análise de repo inteiro → Gemini Flash
+- Tarefas longas e autônomas → GLM 5.1
+
+Se o modelo escolhido falhar, use Groq como fallback automático e informe ao usuário qual modelo foi usado e por que houve fallback.
 
 ═══════════════════════════════════════
-FLUXO PARA CRIAÇÃO DE PROJETOS
+FLUXO PARA CRIAR SISTEMAS
 ═══════════════════════════════════════
-Quando o usuário pedir para criar um site, app ou SaaS:
+1. Use github/get-tree para ler estrutura existente
+2. Planeje TODOS os arquivos necessários de uma vez
+3. Use github/create-commit para criar múltiplos arquivos em um único commit
+4. Nunca crie arquivo por arquivo — pense no sistema como um todo
 
-1. ENTENDIMENTO: Faça as perguntas necessárias para entender:
-   - Objetivo do projeto
-   - Público-alvo
-   - Funcionalidades principais
-   - Stack preferida (ou você sugere a melhor)
-   - Preferências visuais (pode analisar imagem de referência)
-
-2. PLANEJAMENTO: Apresente:
-   - Stack escolhida e justificativa
-   - Estrutura de pastas
-   - Funcionalidades que serão implementadas
-   - Estimativa de complexidade
-
-3. EXECUÇÃO AUTÔNOMA:
-   - Cria o repositório no GitHub com nome adequado
-   - Inicializa o projeto com a stack escolhida
-   - Cria todos os arquivos necessários
-   - Implementa as funcionalidades
-   - Faz commits organizados por feature
-   - Configura deploy na Vercel
-   - Configura banco no Supabase se necessário
-
-4. ENTREGA:
-   - Link do repositório
-   - Link do deploy
-   - Instruções de uso se necessário
+Quando o usuário pedir para criar um site, app, SaaS ou sistema completo, não faça perguntas se a tarefa já tiver objetivo claro. Planeje a estrutura inteira, gere todos os arquivos necessários no mesmo lote e use commits multiarquivo.
 
 ═══════════════════════════════════════
 FLUXO PARA ANÁLISE E CORREÇÃO DE ERROS
@@ -229,6 +192,33 @@ const MODELS: ModelDef[] = [
   { id: "gemini",   name: "Gemini",   icon: <Globe size={15} />, desc: "Flash (contexto massivo)" },
   { id: "glm",      name: "GLM",      icon: <Bot size={15} />,   desc: "5.1 (longo prazo)" },
 ];
+
+function getModelById(id: string): ModelDef {
+  return MODELS.find((model) => model.id === id) || MODELS[0];
+}
+
+function selectAutomaticModel(task: string, attachmentCount = 0, webEnabled = false): ModelDef {
+  const text = task.toLowerCase();
+  const hasAny = (terms: string[]) => terms.some((term) => text.includes(term));
+
+  if (attachmentCount > 0 || webEnabled || hasAny(["repo inteiro", "repositório inteiro", "contexto massivo", "monorepo", "get-tree", "mapear estrutura", "analisar projeto inteiro"])) {
+    return getModelById("gemini");
+  }
+
+  if (hasAny(["debug", "erro", "bug", "corrija", "corrigir", "falha", "stack trace", "logs", "investigue", "raciocínio", "causa raiz"])) {
+    return getModelById("deepseek");
+  }
+
+  if (hasAny(["cria", "criar", "implemente", "implementar", "código", "codigo", "sistema", "app", "site", "html", "css", "javascript", "typescript", "react", "api", "backend", "frontend", "commit", "pull request"])) {
+    return getModelById("qwen");
+  }
+
+  if (hasAny(["várias etapas", "varias etapas", "tarefa longa", "autônoma", "autonoma", "execute todas", "deploy completo", "fim a fim", "end-to-end"])) {
+    return getModelById("glm");
+  }
+
+  return getModelById("groq");
+}
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -579,11 +569,17 @@ export default function ChatPage() {
     setAttachedImages([]);
     setIsLoading(true);
 
+    const selectedModel = selectAutomaticModel(userContent, activeAttachments.length, webSearchEnabled);
+    if (selectedModel.id !== activeModel.id) {
+      setActiveModel(selectedModel);
+      addLog("info", `Modelo selecionado automaticamente: ${selectedModel.name} — ${selectedModel.desc}`);
+    }
+
     const assistantMsg: Message = {
       id: (Date.now() + 1).toString(),
       role: "assistant",
       content: "",
-      model: activeModel.name,
+      model: selectedModel.name,
       tool_calls: []
     };
     setMessages((prev) => [...prev, assistantMsg]);
@@ -677,7 +673,7 @@ export default function ChatPage() {
                 "X-Title": "Zarith AI",
               },
               body: JSON.stringify({
-                model: "qwen/qwen-2-72b-instruct",
+                model: "qwen/qwen3-coder",
                 messages: [
                   { role: "system", content: ZARITH_SYSTEM_PROMPT },
                   ...history,
@@ -720,36 +716,35 @@ export default function ChatPage() {
         }
       };
 
-      // Cadeia de fallback: Groq → Gemini → DeepSeek → Qwen
-      const fallbackChain = ["groq", "gemini", "deepseek", "qwen"];
+      const selectedModelForRun = selectedModel;
+      let usedModel = selectedModelForRun;
+      let fallbackNotice = "";
 
-      fullResponse = await tryModel(activeModel.id, activeModel.name) ?? "";
+      fullResponse = await tryModel(selectedModelForRun.id, selectedModelForRun.name) ?? "";
 
-      if (!fullResponse) {
-        for (const modelId of fallbackChain) {
-          if (modelId === activeModel.id) continue;
-          const modelDef = MODELS.find(m => m.id === modelId);
-          if (modelDef) {
-            console.log(`[Fallback] Tentando ${modelDef.name}...`);
-            setMessages((prev) => {
-              const updated = [...prev];
-              const last = updated[updated.length - 1];
-              if (last?.role === "assistant") {
-                last.content = `⚠️ ${activeModel.name} falhou. Tentando fallback com ${modelDef.name}...`;
-              }
-              return updated;
-            });
-            fullResponse = await tryModel(modelId, modelDef.name) ?? "";
-            if (fullResponse) {
-              console.log(`[Fallback] ${modelDef.name} respondeu com sucesso!`);
-              break;
-            }
+      if (!fullResponse && selectedModelForRun.id !== "groq") {
+        const fallbackModel = getModelById("groq");
+        const failureReason = lastError || "erro desconhecido";
+        addLog("error", `${selectedModelForRun.name} falhou (${failureReason}). Tentando fallback automático com Groq.`);
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === "assistant") {
+            last.content = `⚠️ ${selectedModelForRun.name} falhou (${failureReason}). Tentando fallback automático com ${fallbackModel.name}...`;
+            last.model = fallbackModel.name;
           }
+          return updated;
+        });
+        fullResponse = await tryModel(fallbackModel.id, fallbackModel.name) ?? "";
+        if (fullResponse) {
+          usedModel = fallbackModel;
+          fallbackNotice = `> ⚠️ **Fallback automático:** ${selectedModelForRun.name} falhou (${failureReason}). Usei ${fallbackModel.name} como fallback para concluir a tarefa.\n\n`;
+          fullResponse = fallbackNotice + fullResponse;
         }
       }
 
       if (!fullResponse) {
-        fullResponse = `⚠️ Nenhuma chave de API configurada para **${activeModel.name}**, Jadiel. Vai em **Configurações → API Keys** e bota a chave lá. Sem chave, sem resposta — é assim que funciona. Erro: ${lastError}`;
+        fullResponse = `⚠️ Nenhuma chave de API configurada ou modelo disponível para **${selectedModelForRun.name}**, Jadiel. Vai em **Configurações → API Keys** e bota a chave lá. Sem chave, sem resposta — é assim que funciona. Erro: ${lastError}`;
       }
 
       // Streaming token a token com interrupção em tool calls
@@ -885,7 +880,7 @@ ${executedToolCalls.map(call => {
 
       // Salvar resposta da Zarith no Supabase após execução das ferramentas
       if (sessionId && finalContent) {
-        await saveChatMessage(sessionId, "assistant", finalContent, activeModel.name);
+        await saveChatMessage(sessionId, "assistant", finalContent, usedModel.name);
       }
 
       // ── DETECÇÃO DE INTENÇÕES (Protocolo de Elite) ──
@@ -893,7 +888,7 @@ ${executedToolCalls.map(call => {
       // O banner de autorização manual foi removido para dar fluidez à Zarith.
 
     } catch (error) {
-      const zarithError = getZarithError(error, activeModel.name);
+      const zarithError = getZarithError(error, selectedModel?.name || activeModel.name);
       setMessages((prev) => {
         const updated = [...prev];
         const last = updated[updated.length - 1];
@@ -908,7 +903,7 @@ ${executedToolCalls.map(call => {
       setIsLoading(false);
       setIsPlannerOpen(false);
     }
-  }, [isLoading, activeModel, messages, currentSessionId, createNewSession, saveChatMessage, addLog, updateToolCall, attachedImages]);
+  }, [isLoading, activeModel, messages, currentSessionId, createNewSession, saveChatMessage, addLog, updateToolCall, attachedImages, webSearchEnabled]);
 
   const handleImageUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);

@@ -155,15 +155,44 @@ router.post("/search-code", async (req: Request, res: Response) => {
 
 router.post("/create-commit", async (req: Request, res: Response) => {
   try {
-    const body = getBody(req); const files = Array.isArray(body.files) ? body.files : [];
-    if (!files.length) return res.status(400).json({ success: false, error: "files deve ser um array com { path, content, sha? }." });
-    const results = [];
+    const body = getBody(req);
+    const { owner, repo } = repoParts(req);
+    const files = Array.isArray(body.files) ? body.files : [];
+    if (!files.length) return res.status(400).json({ success: false, error: "files deve ser um array com { path|file|filePath, content, encoding? }." });
+
+    const branch = body.branch || body.base || "main";
+    const message = body.message || "Commit múltiplo via Zarith";
+    const baseRef = await gh(req, `/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(branch)}`);
+    const baseCommit = await gh(req, `/repos/${owner}/${repo}/git/commits/${baseRef.object.sha}`);
+
+    const tree = [];
     for (const file of files) {
-      req.body = { ...body, ...file, message: body.message || file.message || "Commit múltiplo via Zarith" };
-      results.push(await putContent(req, Boolean(file.update || file.sha)));
+      const filePath = required(file.path || file.file || file.filePath, "path");
+      if (file.delete || file.deleted || file.remove) {
+        tree.push({ path: filePath, mode: "100644", type: "blob", sha: null });
+        continue;
+      }
+      const blob = await gh(req, `/repos/${owner}/${repo}/git/blobs`, {
+        method: "POST",
+        body: JSON.stringify({ content: String(file.content ?? ""), encoding: file.encoding === "base64" ? "base64" : "utf-8" }),
+      });
+      tree.push({ path: filePath, mode: file.mode || "100644", type: "blob", sha: blob.sha });
     }
-    req.body = body;
-    return res.json({ success: true, data: results });
+
+    const newTree = await gh(req, `/repos/${owner}/${repo}/git/trees`, {
+      method: "POST",
+      body: JSON.stringify({ base_tree: baseCommit.tree.sha, tree }),
+    });
+    const newCommit = await gh(req, `/repos/${owner}/${repo}/git/commits`, {
+      method: "POST",
+      body: JSON.stringify({ message, tree: newTree.sha, parents: [baseRef.object.sha] }),
+    });
+    const updatedRef = await gh(req, `/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ sha: newCommit.sha, force: Boolean(body.force) }),
+    });
+
+    return res.json({ success: true, data: { commit: newCommit, ref: updatedRef, files: files.map((file: any) => file.path || file.file || file.filePath), branch, owner, repo } });
   } catch (error) { return sendError(res, error, "Não foi possível criar commit múltiplo."); }
 });
 
