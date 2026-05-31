@@ -53,23 +53,15 @@ async function executeSql(sql: string, params: any[] = []) {
 }
 
 async function listTables() {
-  const { data, error } = await getSupabaseClient()
-    .schema("information_schema")
-    .from("tables")
-    .select("table_name, table_schema")
-    .neq("table_schema", "pg_catalog")
-    .neq("table_schema", "information_schema")
-    .order("table_schema", { ascending: true })
-    .order("table_name", { ascending: true });
+  const sql = `
+    select table_schema, table_name
+    from information_schema.tables
+    where table_schema not in ('pg_catalog', 'information_schema')
+      and table_type = 'BASE TABLE'
+    order by table_schema, table_name
+  `;
 
-  if (error) {
-    throw Object.assign(new Error(error.message), {
-      statusCode: Number(error.code) || 500,
-      data: error,
-    });
-  }
-
-  return data;
+  return executeSql(sql);
 }
 
 async function listUsers(req: Request) {
