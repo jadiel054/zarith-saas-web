@@ -24,6 +24,19 @@ function getSupabaseServiceRoleKey() {
   return requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
 }
 
+function getSupabaseAccessToken() {
+  return (process.env.SUPABASE_ACCESS_TOKEN || "").trim();
+}
+
+function getSupabaseProjectRef() {
+  const hostname = new URL(getSupabaseUrl()).hostname;
+  const [ref] = hostname.split(".");
+  if (!ref) {
+    throw Object.assign(new Error("Não foi possível identificar o project ref do Supabase."), { statusCode: 500 });
+  }
+  return ref;
+}
+
 function getSupabaseClient(): SupabaseClient {
   return createClient(getSupabaseUrl(), getSupabaseServiceRoleKey(), {
     auth: {
@@ -33,7 +46,42 @@ function getSupabaseClient(): SupabaseClient {
   });
 }
 
+async function runManagementSql(sql: string, params: any[] = [], readOnly = false) {
+  const accessToken = getSupabaseAccessToken();
+  if (!accessToken) return null;
+
+  const endpoint = readOnly ? "query/read-only" : "query";
+  const response = await fetch(`https://api.supabase.com/v1/projects/${getSupabaseProjectRef()}/database/${endpoint}`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      query: sql,
+      parameters: Array.isArray(params) ? params : [],
+      ...(readOnly ? {} : { read_only: false }),
+    }),
+  });
+
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : null;
+
+  if (!response.ok) {
+    throw Object.assign(new Error(payload?.message || payload?.error || `Falha na Management API do Supabase (${response.status}).`), {
+      statusCode: response.status,
+      data: payload,
+    });
+  }
+
+  if (payload && typeof payload === "object" && "result" in payload) return payload.result;
+  return payload;
+}
+
 async function executeSql(sql: string, params: any[] = []) {
+  const managementData = await runManagementSql(sql, params, false);
+  if (managementData !== null) return managementData;
+
   const rpcArgs: Record<string, unknown> = { query: sql };
 
   if (Array.isArray(params) && params.length > 0) {
@@ -60,6 +108,9 @@ async function listTables() {
       and table_type = 'BASE TABLE'
     order by table_schema, table_name
   `;
+
+  const managementData = await runManagementSql(sql, [], true);
+  if (managementData !== null) return managementData;
 
   return executeSql(sql);
 }
