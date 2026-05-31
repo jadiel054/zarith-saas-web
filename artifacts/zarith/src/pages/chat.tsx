@@ -29,6 +29,7 @@ import { ToolCallStream, ToolCall } from "@/components/tool-call-stream";
 import { deployService } from "@/services/execution/deploy";
 import { githubService } from "@/services/execution/github";
 import { supabaseAdminService } from "@/services/execution/supabaseAdmin";
+import { messagesService } from "@/services/database/messages";
 import { templatesService } from "@/services/templates/templatesService";
 import { Terminal, ShieldAlert, Play, AlertTriangle, Database, Github, LayoutTemplate } from "lucide-react";
 
@@ -544,6 +545,17 @@ export default function ChatPage() {
     }
   }, [deleteSession, currentSessionId, handleNewChat]);
 
+  const handleDeleteMessage = useCallback(async (messageId: string) => {
+    if (!currentSessionId) return;
+    try {
+      await messagesService.deleteMessage(messageId);
+      setMessages((prev) => prev.filter((msg) => msg.id !== messageId));
+      addLog("info", `Mensagem ${messageId} deletada com sucesso.`);
+    } catch (error) {
+      addLog("error", `Erro ao deletar mensagem ${messageId}: ${error}`);
+    }
+  }, [currentSessionId, addLog]);
+
   // ── Auth check ──
   useEffect(() => {
     const checkAuth = async () => {
@@ -885,7 +897,11 @@ export default function ChatPage() {
           
           const res = call.result;
           if (call.name === "github/list-repos" && Array.isArray(res)) {
-            return `Repositórios encontrados:\n${res.map((r: any) => `- ${r.name} | ${r.language} | ${r.visibility} | ${r.url}`).join("\n")}`;
+            const repos = res.slice(0, 20);
+            const formatted = repos.map((r: any) => 
+              `- **${r.name}** | ${r.language || 'N/A'} | ${r.private ? '🔒 privado' : '🌐 público'} | [ver](${r.html_url})`
+            ).join('\n');
+            return `Aqui estão seus repositórios:\n\n${formatted}`;
           }
           if (call.name === "github/read-file") {
             return `Conteúdo de ${call.args?.path}:\n${res.content || res}`;
@@ -1276,15 +1292,15 @@ ${executedToolCalls.map(call => {
                     animate={{ opacity: 1, y: 0 }}
                     className={`flex gap-3 md:gap-4 ${message.role === "user" ? "justify-end" : "justify-start"}`}
                   >
-                    <div className={`flex gap-3 md:gap-4 max-w-2xl ${message.role === "user" ? "flex-row-reverse" : ""}`}>
+                    <div className={`flex gap-3 md:gap-4 w-full max-w-2xl ${message.role === "user" ? "flex-row-reverse" : ""} group`}
                       {message.role === "assistant" && (
                         <div className="w-7 h-7 md:w-8 md:h-8 rounded-full bg-gradient-to-br from-[#00f5ff] to-[#bf00ff] flex items-center justify-center text-black font-bold text-xs shrink-0">
                           Z
                         </div>
                       )}
-                      <div className={`flex flex-col gap-2 ${message.role === "user" ? "items-end" : ""}`}>
+                      <div className={`flex flex-col gap-2 flex-1 ${message.role === "user" ? "items-end" : ""}`}
                         <div
-                          className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                          className={`px-4 py-3 rounded-2xl text-sm leading-relaxed max-w-full overflow-x-auto ${
                             message.role === "user"
                               ? "bg-[#00f5ff]/20 border border-[#00f5ff]/30 text-white"
                               : message.isError
@@ -1292,13 +1308,22 @@ ${executedToolCalls.map(call => {
                               : "bg-[var(--bg-card)] border border-[var(--border-glow)] text-[var(--text-primary)]"
                           }`}
                         >
-                          <div className="prose prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10">
-                            <ReactMarkdown 
-                              remarkPlugins={[remarkGfm]} 
-                              rehypePlugins={[rehypeRaw]}
+                          <div className="flex items-start gap-2">
+                            <div className="prose prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10 flex-1">
+                              <ReactMarkdown 
+                                remarkPlugins={[remarkGfm]} 
+                                rehypePlugins={[rehypeRaw]}
+                              >
+                                {message.content}
+                              </ReactMarkdown>
+                            </div>
+                            <button
+                              onClick={() => handleDeleteMessage(message.id)}
+                              className="text-red-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-1 -mr-2"
+                              title="Apagar mensagem"
                             >
-                              {message.content}
-                            </ReactMarkdown>
+                              <X size={16} />
+                            </button>
                           </div>
                         </div>
 

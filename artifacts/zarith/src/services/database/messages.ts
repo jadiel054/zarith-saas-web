@@ -30,5 +30,19 @@ export const messagesService = {
       .single();
 
     return { data: data as DBMessage | null, error };
+  },
+
+  async deleteMessage(messageId: string) {
+    if (!supabaseClient) return { error: new Error("Supabase não configurado") };
+    const { error } = await supabaseClient
+      .from("messages")
+      .delete()
+      .eq("id", messageId);
+
+    if (error) {
+      console.error("Erro ao deletar mensagem:", error);
+      throw error;
+    }
+    return { error: null };
   }
 };
