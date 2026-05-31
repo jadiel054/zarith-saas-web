@@ -22,8 +22,23 @@ FROM information_schema.tables
 WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
 ORDER BY table_schema, table_name;`;
 
-async function listTables(req: Request) {
-  const { url, key } = supabaseCreds(req);
+function getServerSupabaseCreds() {
+  const url = (process.env.SUPABASE_URL || "").trim();
+  const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
+
+  if (!url) {
+    throw Object.assign(new Error("SUPABASE_URL não configurada no servidor."), { statusCode: 401 });
+  }
+
+  if (!key) {
+    throw Object.assign(new Error("SUPABASE_SERVICE_ROLE_KEY não configurada no servidor."), { statusCode: 401 });
+  }
+
+  return { url: url.replace(/\/$/, ""), key };
+}
+
+async function listTables() {
+  const { url, key } = getServerSupabaseCreds();
   const supabase = createClient(url, key, {
     auth: {
       persistSession: false,
@@ -54,14 +69,14 @@ router.post(["/execute-sql", "/execute"], async (req: Request, res: Response) =>
 
 router.post(["/list-tables", "/tables"], async (req: Request, res: Response) => {
   try {
-    return res.json({ success: true, data: await listTables(req) });
+    return res.json({ success: true, data: await listTables() });
   } catch (error) { return sendError(res, error, "Não foi possível listar tabelas."); }
 });
 
 router.get("/tables", async (req: Request, res: Response) => {
   req.body = { ...req.query, ...req.body };
   try {
-    return res.json({ success: true, data: await listTables(req) });
+    return res.json({ success: true, data: await listTables() });
   } catch (error) { return sendError(res, error, "Não foi possível listar tabelas."); }
 });
 

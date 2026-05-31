@@ -29,7 +29,6 @@ import { ToolCallStream, ToolCall } from "@/components/tool-call-stream";
 import { formatGitHubReposForModel } from "@/services/tools/formatForModel";
 import { deployService } from "@/services/execution/deploy";
 import { githubService } from "@/services/execution/github";
-import { supabaseAdminService } from "@/services/execution/supabaseAdmin";
 import { messagesService } from "@/services/database/messages";
 import { templatesService } from "@/services/templates/templatesService";
 import { Terminal, ShieldAlert, Play, AlertTriangle, Database, Github, LayoutTemplate } from "lucide-react";
@@ -204,8 +203,7 @@ REGRAS DE SEGURANÇA
 - Ao precisar de credencial não disponível, solicite no formato exato:
   GitHub Token: ghp_xxxxxxxxxxxx (precisar de permissão: repo, workflow)
   Vercel Token: xxxxxxxxxxxxxxxx
-  Supabase URL: https://xxxx.supabase.co
-  Supabase Service Role Key: eyJ...
+- Para Supabase, NÃO solicite nem envie URL ou Service Role Key pelo frontend. O backend usa as variáveis de ambiente SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY configuradas no servidor.
 
 ═══════════════════════════════════════
 REGRAS DE APRESENTAÇÃO DE RESULTADOS
@@ -313,6 +311,11 @@ function normalizeToolName(name: string): string {
   return TOOL_ALIASES[raw] || TOOL_ALIASES[normalized] || normalized;
 }
 
+function sanitizeSupabaseArgs(args: any = {}) {
+  const { url: _url, supabaseUrl: _supabaseUrl, SUPABASE_URL: _SUPABASE_URL, key: _key, serviceRoleKey: _serviceRoleKey, service_role_key: _serviceRoleKeySnake, SUPABASE_SERVICE_ROLE_KEY: _SUPABASE_SERVICE_ROLE_KEY, ...safeArgs } = args || {};
+  return safeArgs;
+}
+
 function parseToolCallsFromText(text: string): ToolCallRequest[] {
   const calls: ToolCallRequest[] = [];
   const patterns = [
@@ -362,10 +365,11 @@ async function executeToolCall(
       result = await res.json();
     } else if (request.name.startsWith("supabase/")) {
       const endpoint = request.name.split("/")[1];
+      const safeArgs = sanitizeSupabaseArgs(request.args);
       const res = await fetch(`${API_URL}/api/supabase/${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(request.args),
+        body: JSON.stringify(safeArgs),
       });
       result = await res.json();
     } else if (request.name.startsWith("vercel/")) {
