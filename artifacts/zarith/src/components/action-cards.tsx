@@ -80,9 +80,10 @@ export const QUICK_ACTIONS: QuickAction[] = [
 interface ActionCardsProps {
   userName: string;
   onAction: (message: string) => void;
+  forceMobileLayout?: boolean;
 }
 
-export function ActionCards({ userName, onAction }: ActionCardsProps) {
+export function ActionCards({ userName, onAction, forceMobileLayout = false }: ActionCardsProps) {
   const handleCardClick = async (action: QuickAction) => {
     // Valida sessão antes de disparar
     if (supabaseClient) {
@@ -98,7 +99,7 @@ export function ActionCards({ userName, onAction }: ActionCardsProps) {
   return (
     <div className="flex w-full flex-col items-center justify-center text-center px-0 py-0 min-h-0">
       {/* Cards grid — 2 colunas mobile, 4 colunas desktop */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 w-full max-w-4xl">
+      <div className={`${forceMobileLayout ? "grid-cols-2 max-w-[24rem] gap-3" : "grid-cols-2 md:grid-cols-4 max-w-4xl gap-3 sm:gap-4"} grid w-full`}>
         {QUICK_ACTIONS.map((action, i) => (
           <motion.button
             key={action.title}
@@ -108,7 +109,7 @@ export function ActionCards({ userName, onAction }: ActionCardsProps) {
             onClick={() => handleCardClick(action)}
             whileHover={{ scale: 1.03 }}
             whileTap={{ scale: 0.97 }}
-            className={`relative group flex min-h-[112px] flex-col items-center justify-center gap-2 rounded-2xl border border-[var(--border-glow)] bg-gradient-to-b ${action.gradient} px-3 py-4 text-left cursor-pointer transition-all duration-200 overflow-hidden sm:min-h-[132px] sm:p-4`}
+            className={`relative group flex ${forceMobileLayout ? "min-h-[108px] px-3 py-3" : "min-h-[112px] px-3 py-4 sm:min-h-[132px] sm:p-4"} flex-col items-center justify-center gap-2 rounded-2xl border border-[var(--border-glow)] bg-gradient-to-b ${action.gradient} text-left cursor-pointer transition-all duration-200 overflow-hidden`}
             style={{
               boxShadow: "0 0 0 rgba(0,0,0,0)",
             }}
@@ -128,14 +129,14 @@ export function ActionCards({ userName, onAction }: ActionCardsProps) {
             />
 
             {/* Ícone */}
-            <span className="text-3xl md:text-4xl leading-none">{action.icon}</span>
+            <span className={`${forceMobileLayout ? "text-3xl" : "text-3xl md:text-4xl"} leading-none`}>{action.icon}</span>
 
             {/* Texto */}
             <div className="w-full text-center">
-              <p className="font-bold text-[13px] md:text-sm text-[var(--text-primary)] leading-tight">
+              <p className={`${forceMobileLayout ? "text-[13px]" : "text-[13px] md:text-sm"} font-bold text-[var(--text-primary)] leading-tight`}>
                 {action.title}
               </p>
-              <p className="text-[10px] text-[var(--text-secondary)] mt-0.5 leading-snug hidden md:block">
+              <p className={`${forceMobileLayout ? "hidden" : "hidden md:block"} text-[10px] text-[var(--text-secondary)] mt-0.5 leading-snug`}>
                 {action.description}
               </p>
             </div>
@@ -147,7 +148,7 @@ export function ActionCards({ userName, onAction }: ActionCardsProps) {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.6 }}
-        className="mt-4 md:mt-6 text-[10px] text-[var(--text-secondary)] font-mono uppercase tracking-[0.18em]"
+        className={`${forceMobileLayout ? "mt-4" : "mt-4 md:mt-6"} text-[10px] text-[var(--text-secondary)] font-mono uppercase tracking-[0.18em]`}
       >
         Clique em um card ou escreva sua mensagem abaixo
       </motion.p>

@@ -51,6 +51,7 @@ interface SidebarProps {
   onSelectSession: (id: string) => void;
   onDeleteSession?: (id: string) => void | Promise<void>;
   onRenameSession?: (id: string, title: string) => void | Promise<void>;
+  forceMobileLayout?: boolean;
 }
 
 function loadPinnedSessionIds(): string[] {
@@ -361,6 +362,7 @@ export function Sidebar({
   onSelectSession,
   onDeleteSession,
   onRenameSession,
+  forceMobileLayout = false,
 }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -372,7 +374,7 @@ export function Sidebar({
       {/* ── Mobile: Hamburguer button ── */}
       <button
         onClick={() => setMobileOpen(true)}
-        className="md:hidden fixed top-[calc(0.75rem+env(safe-area-inset-top))] left-3 z-40 p-2.5 bg-[var(--bg-secondary)] border border-[var(--border-glow)] rounded-xl text-[#00f5ff] shadow-lg"
+        className={`${forceMobileLayout ? "flex" : "md:hidden"} fixed top-[calc(0.75rem+env(safe-area-inset-top))] left-3 z-40 p-2.5 bg-[var(--bg-secondary)] border border-[var(--border-glow)] rounded-xl text-[#00f5ff] shadow-lg`}
         aria-label="Abrir menu"
       >
         <Menu size={20} />
@@ -387,7 +389,7 @@ export function Sidebar({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="md:hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
+              className={`${forceMobileLayout ? "block" : "md:hidden"} fixed inset-0 z-50 bg-black/60 backdrop-blur-sm`}
               onClick={() => setMobileOpen(false)}
             />
             {/* Drawer */}
@@ -396,7 +398,7 @@ export function Sidebar({
               animate={{ x: 0 }}
               exit={{ x: "-100%" }}
               transition={{ type: "spring", damping: 26, stiffness: 280 }}
-              className="md:hidden fixed left-0 top-0 bottom-0 z-50 w-[min(88vw,20rem)] border-r border-[var(--border-glow)]"
+              className={`${forceMobileLayout ? "block" : "md:hidden"} fixed left-0 top-0 bottom-0 z-50 w-[min(88vw,20rem)] border-r border-[var(--border-glow)]`}
             >
               <SidebarContent
                 user={user}
@@ -431,7 +433,7 @@ export function Sidebar({
       <motion.div
         animate={{ width: isCollapsed ? 72 : 272 }}
         transition={{ duration: 0.22, ease: "easeInOut" }}
-        className="hidden md:flex h-[100dvh] shrink-0 border-r border-[var(--border-glow)] overflow-hidden"
+        className={`${forceMobileLayout ? "hidden" : "hidden md:flex"} h-[100dvh] shrink-0 border-r border-[var(--border-glow)] overflow-hidden`}
       >
         <SidebarContent
           user={user}

@@ -19,6 +19,8 @@ import {
   Image as ImageIcon,
   X,
   Download,
+  Smartphone,
+  Monitor,
 } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { ActionCards } from "@/components/action-cards";
@@ -282,6 +284,26 @@ interface ChatSession {
   title: string;
   date: string;
   group: "Hoje" | "Ontem" | "Semana passada" | "Mais antigos";
+}
+
+type DisplayModePreference = "mobile" | "desktop";
+
+const DISPLAY_MODE_STORAGE_KEY = "zarith_display_mode_preference";
+
+function getInitialDisplayModePreference(): DisplayModePreference {
+  if (typeof window === "undefined") return "desktop";
+  try {
+    const stored = window.localStorage.getItem(DISPLAY_MODE_STORAGE_KEY);
+    if (stored === "mobile" || stored === "desktop") return stored;
+
+    const isStandalone = window.matchMedia("(display-mode: standalone)").matches || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+    const isAndroid = /Android/i.test(window.navigator.userAgent);
+    const isSmallViewport = window.innerWidth < 768;
+
+    return isStandalone || isAndroid || isSmallViewport ? "mobile" : "desktop";
+  } catch {
+    return "desktop";
+  }
 }
 
 // ── Helper Functions ──────────────────────────────────────────────────────────
@@ -740,12 +762,23 @@ export default function ChatPage() {
     if (typeof window === "undefined") return false;
     return !window.matchMedia("(display-mode: standalone)").matches;
   });
+  const [displayModePreference, setDisplayModePreference] = useState<DisplayModePreference>(() => getInitialDisplayModePreference());
   const [pendingAction, setPendingAction] = useState<{ plan: string; command: string } | null>(null);
   const [userData, setUserData] = useState<UserData>({ name: "Jadiel" });
   const [authChecked, setAuthChecked] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
 
   const { sessions, createNewSession, saveChatMessage, loadMessages, renameSession, deleteSession } = useChatPersistence();
+  const isForcedMobileLayout = displayModePreference === "mobile";
+  const toggleDisplayModePreference = () => {
+    setDisplayModePreference((current) => {
+      const next: DisplayModePreference = current === "mobile" ? "desktop" : "mobile";
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(DISPLAY_MODE_STORAGE_KEY, next);
+      }
+      return next;
+    });
+  };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1700,14 +1733,27 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
         onSelectSession={loadConversation}
         onDeleteSession={handleDeleteSession}
         onRenameSession={handleRenameSession}
+        forceMobileLayout={isForcedMobileLayout}
       />
 
-      <div className="flex-1 flex flex-col min-w-0 w-full overflow-hidden">
+      <div className={`${isForcedMobileLayout ? "w-full" : "flex-1"} flex flex-col min-w-0 overflow-hidden`}>
 
         {/* Header */}
-        <header className="h-14 md:h-16 border-b border-[var(--border-glow)] flex items-center px-3 sm:px-4 md:px-6 bg-[var(--bg-secondary)] gap-3 shrink-0">
-          <div className="w-10 md:hidden shrink-0" />
+        <header className={`${isForcedMobileLayout ? "h-14 px-3" : "h-14 md:h-16 px-3 sm:px-4 md:px-6"} border-b border-[var(--border-glow)] flex items-center bg-[var(--bg-secondary)] gap-3 shrink-0`}>
+          <div className={`${isForcedMobileLayout ? "w-10" : "w-10 md:hidden"} shrink-0`} />
           <div className="flex-1" />
+
+          <button
+            onClick={toggleDisplayModePreference}
+            className="flex h-9 shrink-0 items-center gap-1.5 rounded-2xl border border-[#00f5ff]/25 bg-black/30 px-2.5 text-[10px] font-black uppercase tracking-[0.12em] text-[#00f5ff] shadow-[0_0_14px_rgba(0,245,255,0.10)] transition-all hover:border-[#00f5ff]/70 hover:bg-[#00f5ff]/10"
+            title={displayModePreference === "mobile" ? "Alternar para modo computador" : "Alternar para modo mobile"}
+            aria-label={displayModePreference === "mobile" ? "Modo mobile ativo. Alternar para modo computador" : "Modo computador ativo. Alternar para modo mobile"}
+          >
+            {displayModePreference === "mobile" ? <Smartphone size={13} /> : <Monitor size={13} />}
+            <span className="hidden min-[430px]:inline">
+              {displayModePreference === "mobile" ? "Mobile" : "Computador"}
+            </span>
+          </button>
 
           {isPwaInstallVisible && (
             <button
@@ -1720,7 +1766,7 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
             </button>
           )}
 
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.24em] text-[#00f5ff]/70">
+          <div className={`${isForcedMobileLayout ? "hidden" : "flex"} items-center gap-2 text-xs font-bold uppercase tracking-[0.24em] text-[#00f5ff]/70`}>
             <Zap size={14} />
             <span className="hidden sm:inline">Zarith Super Agente</span>
           </div>
@@ -1877,21 +1923,21 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
         {/* Chat area */}
         <main className="flex-1 overflow-y-auto scrollbar-hide relative">
           {messages.length === 0 ? (
-            <div className="min-h-full flex flex-col items-center justify-start md:justify-center px-4 pb-8 pt-8 sm:pt-10 md:p-8 text-center">
+            <div className={`${isForcedMobileLayout ? "justify-start px-4 pb-8 pt-8" : "justify-start md:justify-center px-4 pb-8 pt-8 sm:pt-10 md:p-8"} min-h-full flex flex-col items-center text-center`}>
               <motion.div
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                className="w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-[1.4rem] md:rounded-3xl bg-gradient-to-br from-[#00f5ff] to-[#bf00ff] flex items-center justify-center text-black mb-4 md:mb-8 shadow-[0_0_42px_rgba(0,245,255,0.28)]"
+                className={`${isForcedMobileLayout ? "h-16 w-16 rounded-[1.4rem] mb-4" : "w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-[1.4rem] md:rounded-3xl mb-4 md:mb-8"} bg-gradient-to-br from-[#00f5ff] to-[#bf00ff] flex items-center justify-center text-black shadow-[0_0_42px_rgba(0,245,255,0.28)]`}
               >
-                <Zap size={34} className="sm:size-10 md:size-12" fill="currentColor" />
+                <Zap size={34} className={isForcedMobileLayout ? "" : "sm:size-10 md:size-12"} fill="currentColor" />
               </motion.div>
-              <h1 className="max-w-[18rem] sm:max-w-none text-[1.55rem] leading-[1.05] sm:text-3xl md:text-4xl font-black mb-2.5 md:mb-4 tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-white/50">
+              <h1 className={`${isForcedMobileLayout ? "max-w-[18rem] text-[1.55rem] leading-[1.05] mb-2.5" : "max-w-[18rem] sm:max-w-none text-[1.55rem] leading-[1.05] sm:text-3xl md:text-4xl mb-2.5 md:mb-4"} font-black tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-white/50`}>
                 O que vamos codar hoje, Jadiel?
               </h1>
-              <p className="text-sm md:text-base leading-relaxed text-[var(--text-secondary)] max-w-sm md:max-w-md mb-6 md:mb-12 font-medium px-1 sm:px-4">
+              <p className={`${isForcedMobileLayout ? "text-sm max-w-sm mb-6 px-1" : "text-sm md:text-base max-w-sm md:max-w-md mb-6 md:mb-12 px-1 sm:px-4"} leading-relaxed text-[var(--text-secondary)] font-medium`}>
                 Eu sou a Zarith. Sou rápida, ácida e resolvo seu código sem frescura. Manda a braba.
               </p>
-              <ActionCards userName={userData?.name || "Jadiel"} onAction={handleQuickAction} />
+              <ActionCards userName={userData?.name || "Jadiel"} onAction={handleQuickAction} forceMobileLayout={isForcedMobileLayout} />
             </div>
           ) : (
             <div className="flex flex-col min-h-full">
@@ -1984,7 +2030,7 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
         </main>
 
         {/* Input area */}
-        <footer className="px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 md:p-5 bg-gradient-to-t from-[var(--bg-primary)] via-[var(--bg-primary)]/95 to-transparent shrink-0">
+        <footer className={`${isForcedMobileLayout ? "px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3" : "px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 md:p-5"} bg-gradient-to-t from-[var(--bg-primary)] via-[var(--bg-primary)]/95 to-transparent shrink-0`}>
           <div className="max-w-4xl mx-auto">
             <AnimatePresence>
               {isPlannerOpen && (
