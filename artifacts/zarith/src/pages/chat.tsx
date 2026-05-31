@@ -382,9 +382,13 @@ async function executeToolCall(
     const endpoint = namespace === "deploy" ? "/api/deploy" : `/api/${namespace}/${action}`;
     const payload = { ...getToolCredentials(namespace), ...(toolCall.args || {}) };
 
+    // Garantir que o método seja SEMPRE POST para evitar HTTP 405
     const response = await fetch(`${window.location.origin}${endpoint}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
       body: JSON.stringify(payload)
     });
 
@@ -764,18 +768,35 @@ export default function ChatPage() {
         fullResponse = `⚠️ Nenhuma chave de API configurada para **${activeModel.name}**, Jadiel. Vai em **Configurações → API Keys** e bota a chave lá. Sem chave, sem resposta — é assim que funciona. Erro: ${lastError}`;
       }
 
-      // Streaming token a token
+      // Streaming token a token com interrupção em tool calls
       const tokens = fullResponse.split(" ");
       let finalContent = "";
+      let toolCallDetected = false;
+
       for (let i = 0; i < tokens.length; i++) {
+        if (toolCallDetected) break;
+
         await new Promise<void>((resolve) => setTimeout(resolve, 20));
         const part = (i === 0 ? "" : " ") + tokens[i];
         finalContent += part;
+
+        // Se detectarmos o início de uma tool call, paramos o streaming de texto fictício
+        if (finalContent.includes("<tool_call>") || finalContent.includes("[TOOL_CALL]")) {
+          // Capturar o bloco completo se ele já veio na resposta (para modelos sem streaming real)
+          const toolMatch = finalContent.match(/<tool_call>[\s\S]*?<\/tool_call>/) || 
+                            finalContent.match(/\[TOOL_CALL:[\s\S]*?\]/);
+          
+          if (toolMatch) {
+            finalContent = finalContent.substring(0, toolMatch.index! + toolMatch[0].length);
+            toolCallDetected = true;
+          }
+        }
+
         setMessages((prev) => {
           const updated = [...prev];
           const last = updated[updated.length - 1];
           if (last?.role === "assistant") {
-            last.content += part;
+            last.content = finalContent;
           }
           return updated;
         });
