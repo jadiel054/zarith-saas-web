@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { waveform } from "ldrs";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
@@ -32,6 +33,12 @@ import { githubService } from "@/services/execution/github";
 import { messagesService } from "@/services/database/messages";
 import { templatesService } from "@/services/templates/templatesService";
 import { Terminal, ShieldAlert, Play, AlertTriangle, Database, Github, LayoutTemplate } from "lucide-react";
+
+waveform.register();
+
+function WaveformLoader({ size, stroke, speed, color }: { size: string; stroke: string; speed: string; color: string }) {
+  return React.createElement("l-waveform", { size, stroke, speed, color });
+}
 
 // ── System Prompt — Personalidade da Zarith com Self-Healing ──────────────────
 
@@ -323,6 +330,7 @@ function parseToolCallsFromText(text: string): ToolCallRequest[] {
   const calls: ToolCallRequest[] = [];
   const patterns = [
     /\[TOOL_CALL\]\s*([\s\S]*?)\s*\[\/TOOL_CALL\]/g,
+    /\[TOOL_CALL:\s*([\s\S]*?)\s*\]/g,
     /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g,
     /```tool_call\s*([\s\S]*?)```/g,
   ];
@@ -345,6 +353,56 @@ function parseToolCallsFromText(text: string): ToolCallRequest[] {
     }
   }
   return calls;
+}
+
+function stripToolCallsFromText(text: string): string {
+  return text
+    .replace(/\[TOOL_CALL\]\s*[\s\S]*?\s*\[\/TOOL_CALL\]/g, "")
+    .replace(/\[TOOL_CALL:[\s\S]*?\]/g, "")
+    .replace(/<tool_call>\s*[\s\S]*?\s*<\/tool_call>/g, "")
+    .replace(/```tool_call\s*[\s\S]*?```/g, "")
+    .trim();
+}
+
+function safeJsonForModel(value: unknown, maxLength = 12000): string {
+  const serialized = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  if (!serialized) return "{}";
+  return serialized.length > maxLength ? `${serialized.slice(0, maxLength)}\n... [resultado truncado]` : serialized;
+}
+
+function formatToolResultForModel(call: ToolCall): string {
+  return `[TOOL_RESULT:${call.name}]\nstatus: ${call.status}\nargs: ${safeJsonForModel(call.args, 4000)}\nresult: ${safeJsonForModel(call.result)}\n[/TOOL_RESULT]`;
+}
+
+function formatToolResultsForUser(calls: ToolCall[]): string {
+  if (calls.length === 0) return "";
+
+  return `\n\n---\n**Resultados das ferramentas executadas:**\n\n${calls.map(call => {
+    if (call.status === "error") {
+      const errorResult = call.result as { error?: string; message?: string } | undefined;
+      return `Falha em **${call.name}**: ${errorResult?.error || errorResult?.message || "erro desconhecido"}.`;
+    }
+
+    if (call.name === "github/list-repos") {
+      return `${formatGitHubReposForModel(call.result)}\n\n> Renderizei os repositórios em cards expansíveis logo abaixo para você navegar sem JSON cru.`;
+    }
+
+    if (call.name === "github/get-file") {
+      const res = call.result as any;
+      const args = call.args as { path?: string } | undefined;
+      return `Arquivo **${args?.path || "solicitado"}** lido com sucesso.\n\n\`\`\`${args?.path?.split('.').pop() || ''}\n${res?.content || res || ""}\n\`\`\``;
+    }
+
+    if (call.name === "vercel/list-projects") {
+      return `${formatVercelProjectsForModel(call.result)}\n\n> Renderizei os projetos da Vercel em cards neon com status, framework, URL de produção e data de atualização.`;
+    }
+
+    if (call.name === "supabase/list-tables") {
+      return `${formatSupabaseTablesForModel(call.result)}\n\n> Renderizei as tabelas do Supabase em cards visuais com badge por schema, sem JSON cru.`;
+    }
+
+    return `**${call.name}** executado com sucesso. Os detalhes técnicos ficam recolhidos no cartão da ferramenta.`;
+  }).join("\n\n")}\n`;
 }
 
 async function executeToolCall(
@@ -420,6 +478,7 @@ export default function ChatPage() {
   const [toolCalls, setToolCalls] = useState<ToolCall[]>([]);
   const [isPlannerOpen, setIsPlannerOpen] = useState(false);
   const [plannerSteps, setPlannerSteps] = useState<PlanStep[]>([]);
+  const [currentToolName, setCurrentToolName] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<{ plan: string; command: string } | null>(null);
   const [userData, setUserData] = useState<UserData>({ name: "Jadiel" });
   const [authChecked, setAuthChecked] = useState(false);
@@ -430,6 +489,7 @@ export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const addLog = useCallback((type: LogEntry["type"], message: string) => {
     setLogs((prev) => [{ id: Date.now().toString(), type, message, timestamp: Date.now() }, ...prev].slice(0, 50));
@@ -568,6 +628,10 @@ export default function ChatPage() {
     setInput("");
     setAttachedImages([]);
     setIsLoading(true);
+    setCurrentToolName(null);
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     const selectedModel = selectAutomaticModel(userContent, activeAttachments.length, webSearchEnabled);
     if (selectedModel.id !== activeModel.id) {
@@ -584,31 +648,52 @@ export default function ChatPage() {
     };
     setMessages((prev) => [...prev, assistantMsg]);
 
+    type AgentHistoryMessage = {
+      role: "system" | "user" | "assistant" | "tool";
+      content: string;
+      name?: string;
+    };
+
+    const toProviderMessage = (message: AgentHistoryMessage) => ({
+      role: message.role === "tool" ? "user" : message.role,
+      content: message.role === "tool"
+        ? `Resultado da ferramenta ${message.name || "tool"}:\n${message.content}`
+        : message.content,
+    });
+
     try {
       const groqKey   = getApiKey("zarith_apikey_Groq", import.meta.env.VITE_GROQ_API_KEY);
       const geminiKey = getApiKey("zarith_apikey_Gemini", import.meta.env.VITE_GEMINI_API_KEY);
       const orKey     = getApiKey("zarith_apikey_OpenRouter", import.meta.env.VITE_OPENROUTER_API_KEY);
 
-      const history = messages.slice(-12).map((m) => ({
+      const history: AgentHistoryMessage[] = messages.slice(-12).map((m) => ({
         role: m.role,
         content: m.content,
       }));
 
-      let fullResponse = "";
+      const agentHistory: AgentHistoryMessage[] = [...history, { role: "user", content: userContent }];
+
       let lastError = "";
 
-      const tryModel = async (modelId: string, modelName: string): Promise<string | null> => {
+      const tryModel = async (
+        modelId: string,
+        modelName: string,
+        runHistory: AgentHistoryMessage[],
+        signal: AbortSignal
+      ): Promise<string | null> => {
         try {
+          const providerMessages = runHistory.map(toProviderMessage);
+
           if (modelId === "groq" && groqKey) {
             const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
+              signal,
               body: JSON.stringify({
                 model: "llama-3.3-70b-versatile",
                 messages: [
                   { role: "system", content: ZARITH_SYSTEM_PROMPT },
-                  ...history,
-                  { role: "user", content: userContent },
+                  ...providerMessages,
                 ],
                 max_tokens: 2048,
                 temperature: 0.85,
@@ -627,12 +712,12 @@ export default function ChatPage() {
                 "HTTP-Referer": window.location.origin,
                 "X-Title": "Zarith AI",
               },
+              signal,
               body: JSON.stringify({
                 model: "deepseek/deepseek-r1",
                 messages: [
                   { role: "system", content: ZARITH_SYSTEM_PROMPT },
-                  ...history,
-                  { role: "user", content: userContent },
+                  ...providerMessages,
                 ],
                 max_tokens: 2048,
               }),
@@ -642,18 +727,19 @@ export default function ChatPage() {
             return data.choices[0]?.message?.content ?? "Sem resposta.";
 
           } else if (modelId === "gemini" && geminiKey) {
-            const chatMessages = [...history.filter(m => m.role !== "system"), { role: "user", content: userContent }];
+            const chatMessages = runHistory.filter(m => m.role !== "system");
             
             const res = await fetch(
               `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`,
               {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
+                signal,
                 body: JSON.stringify({
                   systemInstruction: { parts: [{ text: ZARITH_SYSTEM_PROMPT }] },
                   contents: chatMessages.map(m => ({
-                    role: m.role === "user" ? "user" : "model",
-                    parts: [{ text: m.content }]
+                    role: m.role === "assistant" ? "model" : "user",
+                    parts: [{ text: m.role === "tool" ? `Resultado da ferramenta ${m.name || "tool"}:\n${m.content}` : m.content }]
                   })),
                   generationConfig: { maxOutputTokens: 2048, temperature: 0.85 }
                 })
@@ -672,12 +758,12 @@ export default function ChatPage() {
                 "HTTP-Referer": window.location.origin,
                 "X-Title": "Zarith AI",
               },
+              signal,
               body: JSON.stringify({
                 model: "qwen/qwen3-coder",
                 messages: [
                   { role: "system", content: ZARITH_SYSTEM_PROMPT },
-                  ...history,
-                  { role: "user", content: userContent },
+                  ...providerMessages,
                 ],
                 max_tokens: 2048,
               }),
@@ -695,12 +781,12 @@ export default function ChatPage() {
                 "HTTP-Referer": window.location.origin,
                 "X-Title": "Zarith AI",
               },
+              signal,
               body: JSON.stringify({
                 model: "z-ai/glm-4-32b",
                 messages: [
                   { role: "system", content: ZARITH_SYSTEM_PROMPT },
-                  ...history,
-                  { role: "user", content: userContent },
+                  ...providerMessages,
                 ],
                 max_tokens: 2048,
               }),
@@ -711,6 +797,7 @@ export default function ChatPage() {
           }
           return null;
         } catch (err) {
+          if (err instanceof DOMException && err.name === "AbortError") throw err;
           lastError = err instanceof Error ? err.message : String(err);
           return null;
         }
@@ -718,73 +805,79 @@ export default function ChatPage() {
 
       const selectedModelForRun = selectedModel;
       let usedModel = selectedModelForRun;
-      let fallbackNotice = "";
-
-      fullResponse = await tryModel(selectedModelForRun.id, selectedModelForRun.name) ?? "";
-
-      if (!fullResponse && selectedModelForRun.id !== "groq") {
-        const fallbackModel = getModelById("groq");
-        const failureReason = lastError || "erro desconhecido";
-        addLog("error", `${selectedModelForRun.name} falhou (${failureReason}). Tentando fallback automático com Groq.`);
-        setMessages((prev) => {
-          const updated = [...prev];
-          const last = updated[updated.length - 1];
-          if (last?.role === "assistant") {
-            last.content = `⚠️ ${selectedModelForRun.name} falhou (${failureReason}). Tentando fallback automático com ${fallbackModel.name}...`;
-            last.model = fallbackModel.name;
-          }
-          return updated;
-        });
-        fullResponse = await tryModel(fallbackModel.id, fallbackModel.name) ?? "";
-        if (fullResponse) {
-          usedModel = fallbackModel;
-          fallbackNotice = `> ⚠️ **Fallback automático:** ${selectedModelForRun.name} falhou (${failureReason}). Usei ${fallbackModel.name} como fallback para concluir a tarefa.\n\n`;
-          fullResponse = fallbackNotice + fullResponse;
-        }
-      }
-
-      if (!fullResponse) {
-        fullResponse = `⚠️ Nenhuma chave de API configurada ou modelo disponível para **${selectedModelForRun.name}**, Jadiel. Vai em **Configurações → API Keys** e bota a chave lá. Sem chave, sem resposta — é assim que funciona. Erro: ${lastError}`;
-      }
-
-      // Streaming token a token com interrupção em tool calls
-      const tokens = fullResponse.split(" ");
       let finalContent = "";
-      let toolCallDetected = false;
+      let executedToolCalls: ToolCall[] = [];
+      let continueLoop = true;
+      let loopCount = 0;
+      const maxAgentLoops = 12;
 
-      for (let i = 0; i < tokens.length; i++) {
-        if (toolCallDetected) break;
+      while (continueLoop && loopCount < maxAgentLoops) {
+        if (controller.signal.aborted) throw new DOMException("Execução cancelada", "AbortError");
+        loopCount += 1;
+        lastError = "";
+        setCurrentToolName(loopCount === 1 ? "raciocínio inicial" : "analisando resultados");
+        addLog("info", `Loop de agente ${loopCount}/${maxAgentLoops}: chamando modelo com histórico atualizado.`);
 
-        await new Promise<void>((resolve) => setTimeout(resolve, 20));
-        const part = (i === 0 ? "" : " ") + tokens[i];
-        finalContent += part;
+        let fullResponse = await tryModel(selectedModelForRun.id, selectedModelForRun.name, agentHistory, controller.signal) ?? "";
 
-        // Se detectarmos o início de uma tool call, paramos o streaming de texto fictício
-        if (finalContent.includes("<tool_call>") || finalContent.includes("[TOOL_CALL]")) {
-          // Capturar o bloco completo se ele já veio na resposta (para modelos sem streaming real)
-          const toolMatch = finalContent.match(/<tool_call>[\s\S]*?<\/tool_call>/) || 
-                            finalContent.match(/\[TOOL_CALL:[\s\S]*?\]/);
-          
-          if (toolMatch) {
-            finalContent = finalContent.substring(0, toolMatch.index! + toolMatch[0].length);
-            toolCallDetected = true;
+        if (!fullResponse && selectedModelForRun.id !== "groq") {
+          const fallbackModel = getModelById("groq");
+          const failureReason = lastError || "erro desconhecido";
+          addLog("error", `${selectedModelForRun.name} falhou (${failureReason}). Tentando fallback automático com Groq.`);
+          setMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            if (last?.role === "assistant") {
+              last.content = `${finalContent}\n\n⚠️ ${selectedModelForRun.name} falhou (${failureReason}). Tentando fallback automático com ${fallbackModel.name}...`.trim();
+              last.model = fallbackModel.name;
+            }
+            return updated;
+          });
+          fullResponse = await tryModel(fallbackModel.id, fallbackModel.name, agentHistory, controller.signal) ?? "";
+          if (fullResponse) {
+            usedModel = fallbackModel;
+            fullResponse = `> ⚠️ **Fallback automático:** ${selectedModelForRun.name} falhou (${failureReason}). Usei ${fallbackModel.name} como fallback para concluir a tarefa.\n\n${fullResponse}`;
           }
         }
 
-        setMessages((prev) => {
-          const updated = [...prev];
-          const last = updated[updated.length - 1];
-          if (last?.role === "assistant") {
-            last.content = finalContent;
-          }
-          return updated;
-        });
-      }
-      // ── PROCESSAMENTO REAL DE TOOL CALLS ──
-      const detectedToolRequests = parseToolCallsFromText(finalContent);
-      let executedToolCalls: ToolCall[] = [];
+        if (!fullResponse) {
+          fullResponse = `⚠️ Nenhuma chave de API configurada ou modelo disponível para **${selectedModelForRun.name}**, Jadiel. Vai em **Configurações → API Keys** e bota a chave lá. Sem chave, sem resposta — é assim que funciona. Erro: ${lastError}`;
+        }
 
-      if (detectedToolRequests.length > 0) {
+        const detectedToolRequests = parseToolCallsFromText(fullResponse);
+        const visibleResponse = stripToolCallsFromText(fullResponse);
+
+        if (visibleResponse) {
+          const prefix = finalContent ? "\n\n" : "";
+          const tokens = visibleResponse.split(" ");
+          finalContent += prefix;
+
+          for (let i = 0; i < tokens.length; i++) {
+            if (controller.signal.aborted) throw new DOMException("Execução cancelada", "AbortError");
+            await new Promise<void>((resolve) => setTimeout(resolve, 20));
+            const part = (i === 0 ? "" : " ") + tokens[i];
+            finalContent += part;
+
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last?.role === "assistant") {
+                last.content = finalContent;
+                last.model = usedModel.name;
+              }
+              return updated;
+            });
+          }
+        }
+
+        agentHistory.push({ role: "assistant", content: fullResponse });
+
+        if (detectedToolRequests.length === 0) {
+          continueLoop = false;
+          setCurrentToolName(null);
+          break;
+        }
+
         const initialCalls: ToolCall[] = detectedToolRequests.map((tc) => ({
           id: Math.random().toString(36).substring(7),
           name: normalizeToolName(tc.name),
@@ -792,23 +885,33 @@ export default function ChatPage() {
           status: "calling"
         }));
 
-        setToolCalls(initialCalls);
-        setPlannerSteps(initialCalls.map((tc) => ({
-          id: tc.id,
-          title: `Executar ${tc.name}`,
-          status: "pending" as const
-        })));
+        setToolCalls(prev => [...prev, ...initialCalls]);
+        setPlannerSteps(prev => [
+          ...prev,
+          ...initialCalls.map((tc) => ({
+            id: tc.id,
+            title: `Executar ${tc.name}`,
+            status: "pending" as const
+          }))
+        ]);
         setIsPlannerOpen(true);
-        addLog('info', `Detectadas ${initialCalls.length} ferramentas para executar`);
+        addLog('info', `Loop ${loopCount}: detectadas ${initialCalls.length} ferramenta(s) para executar.`);
 
         setMessages((prev) => {
           const updated = [...prev];
           const last = updated[updated.length - 1];
-          if (last?.role === "assistant") last.tool_calls = initialCalls;
+          if (last?.role === "assistant") last.tool_calls = [...executedToolCalls, ...initialCalls];
           return updated;
         });
 
-        for (const request of detectedToolRequests) {
+        const loopExecutedToolCalls: ToolCall[] = [];
+
+        for (let index = 0; index < detectedToolRequests.length; index += 1) {
+          if (controller.signal.aborted) throw new DOMException("Execução cancelada", "AbortError");
+          const request = detectedToolRequests[index];
+          const normalizedName = normalizeToolName(request.name);
+          const plannerStepId = initialCalls[index]?.id;
+
           if (request.name.startsWith("vision/") && activeAttachments.length > 0 && !request.args?.imageBase64) {
             const firstImage = activeAttachments[0];
             request.args = {
@@ -818,67 +921,63 @@ export default function ChatPage() {
               prompt: request.args?.prompt || content || "Analise esta imagem e descreva problemas, layout, texto e recomendações técnicas."
             };
           }
+
+          setCurrentToolName(normalizedName);
           setPlannerSteps(prev => prev.map(step =>
-            step.title === `Executar ${normalizeToolName(request.name)}` ? { ...step, status: "running" as const } : step
+            step.id === plannerStepId ? { ...step, status: "running" as const } : step
           ));
 
-          const result = await executeToolCall(request, addLog, updateToolCall);
-          executedToolCalls.push(result);
+          const result = await executeToolCall({ ...request, name: normalizedName }, addLog, updateToolCall);
+          loopExecutedToolCalls.push(result);
+          executedToolCalls = [...executedToolCalls, result];
+          agentHistory.push({ role: "tool", name: result.name, content: formatToolResultForModel(result) });
 
           setPlannerSteps(prev => prev.map(step =>
-            step.title === `Executar ${result.name}`
+            step.id === plannerStepId
               ? { ...step, status: result.status === "success" ? "completed" : "failed" }
               : step
           ));
+
+          setMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            if (last?.role === "assistant") {
+              last.tool_calls = executedToolCalls;
+            }
+            return updated;
+          });
         }
 
-        const toolSummary = `
+        const toolSummary = formatToolResultsForUser(loopExecutedToolCalls);
+        if (toolSummary) {
+          finalContent += toolSummary;
+          setMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            if (last?.role === "assistant") {
+              last.content = finalContent;
+              last.tool_calls = executedToolCalls;
+            }
+            return updated;
+          });
+        }
 
----
-**Resultados das ferramentas executadas:**
+        continueLoop = true;
+      }
 
-${executedToolCalls.map(call => {
-  if (call.status === "error") {
-    const errorResult = call.result as { error?: string; message?: string } | undefined;
-    return `Falha em **${call.name}**: ${errorResult?.error || errorResult?.message || 'erro desconhecido'}.`;
-  }
-
-  if (call.name === "github/list-repos") {
-    return `${formatGitHubReposForModel(call.result)}\n\n> Renderizei os repositórios em cards expansíveis logo abaixo para você navegar sem JSON cru.`;
-  }
-
-  if (call.name === "github/get-file") {
-    const res = call.result as any;
-    const args = call.args as { path?: string } | undefined;
-    return `Arquivo **${args?.path || "solicitado"}** lido com sucesso.\n\n\`\`\`${args?.path?.split('.').pop() || ''}\n${res?.content || res || ""}\n\`\`\``;
-  }
-
-  if (call.name === "vercel/list-projects") {
-    return `${formatVercelProjectsForModel(call.result)}\n\n> Renderizei os projetos da Vercel em cards neon com status, framework, URL de produção e data de atualização.`;
-  }
-
-  if (call.name === "supabase/list-tables") {
-    return `${formatSupabaseTablesForModel(call.result)}\n\n> Renderizei as tabelas do Supabase em cards visuais com badge por schema, sem JSON cru.`;
-  }
-
-  return `**${call.name}** executado com sucesso. Os detalhes técnicos ficam recolhidos no cartão da ferramenta.`;
-}).join("\n\n")}
-`;
-        finalContent += toolSummary;
-
+      if (loopCount >= maxAgentLoops) {
+        const limitNotice = "\n\n> ⚠️ Limite de segurança do loop de agente atingido. Interrompi para evitar execução infinita.";
+        finalContent += limitNotice;
+        addLog("error", "Loop de agente interrompido por limite de segurança.");
         setMessages((prev) => {
           const updated = [...prev];
           const last = updated[updated.length - 1];
-          if (last?.role === "assistant") {
-            last.content = finalContent;
-            last.tool_calls = executedToolCalls;
-          }
+          if (last?.role === "assistant") last.content = finalContent;
           return updated;
         });
-        setIsPlannerOpen(false);
       }
 
-      // Salvar resposta da Zarith no Supabase após execução das ferramentas
+      // Salvar resposta da Zarith no Supabase após execução completa do loop
       if (sessionId && finalContent) {
         await saveChatMessage(sessionId, "assistant", finalContent, usedModel.name);
       }
@@ -888,20 +987,25 @@ ${executedToolCalls.map(call => {
       // O banner de autorização manual foi removido para dar fluidez à Zarith.
 
     } catch (error) {
-      const zarithError = getZarithError(error, selectedModel?.name || activeModel.name);
+      const wasAborted = error instanceof DOMException && error.name === "AbortError";
+      const zarithError = wasAborted
+        ? "Execução cancelada, Jadiel. Parei o loop de agente antes da próxima tool call."
+        : getZarithError(error, selectedModel?.name || activeModel.name);
       setMessages((prev) => {
         const updated = [...prev];
         const last = updated[updated.length - 1];
         if (last?.role === "assistant") {
-          last.content = zarithError;
-          last.isError = true;
+          last.content = last.content ? `${last.content}\n\n${zarithError}` : zarithError;
+          last.isError = !wasAborted;
         }
         return updated;
       });
-      addLog('error', `Erro ao processar mensagem: ${zarithError}`);
+      addLog(wasAborted ? 'info' : 'error', wasAborted ? 'Loop de agente cancelado pelo usuário.' : `Erro ao processar mensagem: ${zarithError}`);
     } finally {
       setIsLoading(false);
       setIsPlannerOpen(false);
+      setCurrentToolName(null);
+      abortControllerRef.current = null;
     }
   }, [isLoading, activeModel, messages, currentSessionId, createNewSession, saveChatMessage, addLog, updateToolCall, attachedImages, webSearchEnabled]);
 
@@ -931,9 +1035,19 @@ ${executedToolCalls.map(call => {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [addLog]);
 
+  const handleCancelAgentLoop = useCallback(() => {
+    abortControllerRef.current?.abort();
+    setCurrentToolName(null);
+    addLog("info", "Cancelamento solicitado pelo usuário.");
+  }, [addLog]);
+
   const handleSendMessage = useCallback(() => {
+    if (isLoading) {
+      handleCancelAgentLoop();
+      return;
+    }
     sendMessage(input);
-  }, [sendMessage, input]);
+  }, [sendMessage, input, isLoading, handleCancelAgentLoop]);
 
   const handleQuickAction = useCallback((message: string) => {
     sendMessage(message);
@@ -1227,6 +1341,32 @@ ${executedToolCalls.map(call => {
             </AnimatePresence>
 
             <AnimatePresence>
+              {currentToolName && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 8 }}
+                  className="mb-3 flex items-center justify-between gap-3 rounded-2xl border border-[#00f5ff]/30 bg-[#00f5ff]/5 px-4 py-3 shadow-[0_0_24px_rgba(0,245,255,0.12)]"
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[#00f5ff]/30 bg-black/40 text-[#00f5ff]">
+                      <WaveformLoader size="20" stroke="3" speed="1" color="#00f5ff" />
+                    </div>
+                    <p className="truncate text-xs font-bold uppercase tracking-[0.18em] text-[#00f5ff]">
+                      Zarith executando: <span className="text-white">{currentToolName}</span>...
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleCancelAgentLoop}
+                    className="shrink-0 rounded-xl border border-[#ff0080]/40 bg-[#ff0080]/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-[#ff0080] transition-all hover:bg-[#ff0080]/20 hover:shadow-[0_0_18px_rgba(255,0,128,0.25)]"
+                  >
+                    Cancelar
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <AnimatePresence>
               {attachedImages.length > 0 && (
                 <motion.div
                   initial={{ opacity: 0, y: 8 }}
@@ -1344,16 +1484,21 @@ ${executedToolCalls.map(call => {
 
                 <button
                   onClick={handleSendMessage}
-                  disabled={isLoading || (!input.trim() && attachedImages.length === 0)}
+                  disabled={!isLoading && !input.trim() && attachedImages.length === 0}
                   className={`h-11 w-11 shrink-0 rounded-2xl transition-all shadow-lg flex items-center justify-center ${
-                    isLoading || (!input.trim() && attachedImages.length === 0)
-                      ? "bg-white/5 text-white/20 cursor-not-allowed"
-                      : "bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] text-black hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(0,245,255,0.3)]"
+                    isLoading
+                      ? "bg-[#ff0080]/15 text-[#ff0080] border border-[#ff0080]/40 hover:bg-[#ff0080]/25 hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(255,0,128,0.25)]"
+                      : (!input.trim() && attachedImages.length === 0)
+                        ? "bg-white/5 text-white/20 cursor-not-allowed"
+                        : "bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] text-black hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(0,245,255,0.3)]"
                   }`}
-                  title="Enviar mensagem"
+                  title={isLoading ? "Cancelar execução" : "Enviar mensagem"}
                 >
                   {isLoading ? (
-                    <div className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                    <div className="flex flex-col items-center gap-0.5">
+                      <WaveformLoader size="18" stroke="3" speed="1" color="#ff0080" />
+                      <X size={10} strokeWidth={4} />
+                    </div>
                   ) : (
                     <Send size={18} fill="currentColor" />
                   )}
