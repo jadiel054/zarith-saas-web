@@ -18,6 +18,7 @@ import {
   Check,
   Image as ImageIcon,
   X,
+  Download,
 } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { ActionCards } from "@/components/action-cards";
@@ -735,6 +736,10 @@ export default function ChatPage() {
   const [currentToolName, setCurrentToolName] = useState<string | null>(null);
   const [pendingDestructiveAction, setPendingDestructiveAction] = useState<PendingDestructiveAction | null>(null);
   const [activeProjectContext, setActiveProjectContext] = useState<ActiveProjectContext | null>(() => loadStoredActiveProjectContext());
+  const [isPwaInstallVisible, setIsPwaInstallVisible] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return !window.matchMedia("(display-mode: standalone)").matches;
+  });
   const [pendingAction, setPendingAction] = useState<{ plan: string; command: string } | null>(null);
   const [userData, setUserData] = useState<UserData>({ name: "Jadiel" });
   const [authChecked, setAuthChecked] = useState(false);
@@ -1610,6 +1615,35 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
     setTimeout(() => setCopiedId(null), 2000);
   }, []);
 
+  const handleInstallPwa = async () => {
+    const promptEvent = window.deferredZarithInstallPrompt;
+
+    if (promptEvent) {
+      await promptEvent.prompt();
+      const choice = await promptEvent.userChoice;
+      if (choice.outcome === "accepted") {
+        window.deferredZarithInstallPrompt = undefined;
+        setIsPwaInstallVisible(false);
+      }
+      return;
+    }
+
+    window.alert("No Chrome Android, toque no menu ⋮ e escolha ‘Instalar app’ ou ‘Adicionar à tela inicial’. Se a opção ainda não aparecer, atualize a página e tente novamente após alguns segundos.");
+  };
+
+  useEffect(() => {
+    const showInstall = () => setIsPwaInstallVisible(!window.matchMedia("(display-mode: standalone)").matches);
+    const hideInstall = () => setIsPwaInstallVisible(false);
+
+    window.addEventListener("zarith:pwa-install-available", showInstall);
+    window.addEventListener("zarith:pwa-installed", hideInstall);
+
+    return () => {
+      window.removeEventListener("zarith:pwa-install-available", showInstall);
+      window.removeEventListener("zarith:pwa-installed", hideInstall);
+    };
+  }, []);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -1674,6 +1708,17 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
         <header className="h-14 md:h-16 border-b border-[var(--border-glow)] flex items-center px-3 sm:px-4 md:px-6 bg-[var(--bg-secondary)] gap-3 shrink-0">
           <div className="w-10 md:hidden shrink-0" />
           <div className="flex-1" />
+
+          {isPwaInstallVisible && (
+            <button
+              onClick={handleInstallPwa}
+              className="flex h-9 shrink-0 items-center gap-1.5 rounded-2xl border border-[#00f5ff]/30 bg-[#00f5ff]/10 px-3 text-[10px] font-black uppercase tracking-[0.14em] text-[#00f5ff] shadow-[0_0_18px_rgba(0,245,255,0.12)] transition-all hover:border-[#00f5ff] hover:bg-[#00f5ff]/15"
+              title="Instalar Zarith"
+            >
+              <Download size={13} />
+              <span className="hidden min-[380px]:inline">Instalar</span>
+            </button>
+          )}
 
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.24em] text-[#00f5ff]/70">
             <Zap size={14} />
@@ -1832,18 +1877,18 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
         {/* Chat area */}
         <main className="flex-1 overflow-y-auto scrollbar-hide relative">
           {messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center p-4 md:p-8 text-center">
+            <div className="min-h-full flex flex-col items-center justify-start md:justify-center px-4 pb-8 pt-8 sm:pt-10 md:p-8 text-center">
               <motion.div
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                className="w-20 h-20 md:w-24 md:h-24 rounded-3xl bg-gradient-to-br from-[#00f5ff] to-[#bf00ff] flex items-center justify-center text-black mb-6 md:mb-8 shadow-[0_0_50px_rgba(0,245,255,0.3)]"
+                className="w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-[1.4rem] md:rounded-3xl bg-gradient-to-br from-[#00f5ff] to-[#bf00ff] flex items-center justify-center text-black mb-4 md:mb-8 shadow-[0_0_42px_rgba(0,245,255,0.28)]"
               >
-                <Zap size={40} className="md:size-48" fill="currentColor" />
+                <Zap size={34} className="sm:size-10 md:size-12" fill="currentColor" />
               </motion.div>
-              <h1 className="text-2xl md:text-4xl font-black mb-3 md:mb-4 tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-white to-white/50">
+              <h1 className="max-w-[18rem] sm:max-w-none text-[1.55rem] leading-[1.05] sm:text-3xl md:text-4xl font-black mb-2.5 md:mb-4 tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-white/50">
                 O que vamos codar hoje, Jadiel?
               </h1>
-              <p className="text-sm md:text-base text-[var(--text-secondary)] max-w-md mb-8 md:mb-12 font-medium px-4">
+              <p className="text-sm md:text-base leading-relaxed text-[var(--text-secondary)] max-w-sm md:max-w-md mb-6 md:mb-12 font-medium px-1 sm:px-4">
                 Eu sou a Zarith. Sou rápida, ácida e resolvo seu código sem frescura. Manda a braba.
               </p>
               <ActionCards userName={userData?.name || "Jadiel"} onAction={handleQuickAction} />

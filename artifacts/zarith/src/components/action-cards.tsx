@@ -96,27 +96,9 @@ export function ActionCards({ userName, onAction }: ActionCardsProps) {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center h-full text-center px-4 py-8 min-h-0">
-      {/* Saudação */}
-      <motion.div
-        initial={{ opacity: 0, y: -16 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="mb-8 space-y-2"
-      >
-        {/* Logo */}
-        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#00f5ff] to-[#bf00ff] flex items-center justify-center mx-auto mb-4 shadow-[0_0_24px_rgba(0,245,255,0.4)]">
-          <span className="font-orbitron font-black text-2xl text-[#020208]">Z</span>
-        </div>
-        <h2 className="font-orbitron font-black text-2xl md:text-3xl tracking-widest text-glow-cyan">
-          OI, JADIEL ALVES
-        </h2>
-        <p className="text-sm text-[var(--text-secondary)] max-w-sm mx-auto">
-          Sou a Zarith. O que a gente vai codar hoje?
-        </p>
-      </motion.div>
-
+    <div className="flex w-full flex-col items-center justify-center text-center px-0 py-0 min-h-0">
       {/* Cards grid — 2 colunas mobile, 4 colunas desktop */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 w-full max-w-4xl">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 w-full max-w-4xl">
         {QUICK_ACTIONS.map((action, i) => (
           <motion.button
             key={action.title}
@@ -126,7 +108,7 @@ export function ActionCards({ userName, onAction }: ActionCardsProps) {
             onClick={() => handleCardClick(action)}
             whileHover={{ scale: 1.03 }}
             whileTap={{ scale: 0.97 }}
-            className={`relative group flex flex-col items-center gap-2 p-4 rounded-2xl border border-[var(--border-glow)] bg-gradient-to-b ${action.gradient} text-left cursor-pointer transition-all duration-200 overflow-hidden`}
+            className={`relative group flex min-h-[112px] flex-col items-center justify-center gap-2 rounded-2xl border border-[var(--border-glow)] bg-gradient-to-b ${action.gradient} px-3 py-4 text-left cursor-pointer transition-all duration-200 overflow-hidden sm:min-h-[132px] sm:p-4`}
             style={{
               boxShadow: "0 0 0 rgba(0,0,0,0)",
             }}
@@ -150,7 +132,7 @@ export function ActionCards({ userName, onAction }: ActionCardsProps) {
 
             {/* Texto */}
             <div className="w-full text-center">
-              <p className="font-bold text-xs md:text-sm text-[var(--text-primary)] leading-tight">
+              <p className="font-bold text-[13px] md:text-sm text-[var(--text-primary)] leading-tight">
                 {action.title}
               </p>
               <p className="text-[10px] text-[var(--text-secondary)] mt-0.5 leading-snug hidden md:block">
@@ -165,7 +147,7 @@ export function ActionCards({ userName, onAction }: ActionCardsProps) {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.6 }}
-        className="mt-6 text-[10px] text-[var(--text-secondary)] font-mono uppercase tracking-widest"
+        className="mt-4 md:mt-6 text-[10px] text-[var(--text-secondary)] font-mono uppercase tracking-[0.18em]"
       >
         Clique em um card ou escreva sua mensagem abaixo
       </motion.p>
