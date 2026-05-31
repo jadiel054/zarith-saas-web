@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus,
@@ -12,9 +12,23 @@ import {
   Menu,
   X,
   Info,
+  MoreHorizontal,
+  Pin,
+  PinOff,
+  Pencil,
+  Share2,
 } from "lucide-react";
 import { Link } from "wouter";
 import { AboutModal } from "@/components/about-modal";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+const PINNED_SESSIONS_STORAGE_KEY = "zarith_pinned_sessions";
 
 interface ChatSession {
   id: string;
@@ -35,7 +49,19 @@ interface SidebarProps {
   sessions: ChatSession[];
   activeSessionId?: string;
   onSelectSession: (id: string) => void;
-  onDeleteSession?: (id: string) => void;
+  onDeleteSession?: (id: string) => void | Promise<void>;
+  onRenameSession?: (id: string, title: string) => void | Promise<void>;
+}
+
+function loadPinnedSessionIds(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(PINNED_SESSIONS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 /** Conteúdo interno da sidebar — compartilhado entre desktop e mobile drawer */
@@ -51,6 +77,7 @@ function SidebarContent({
   onAbout,
   onSelectSession,
   onDeleteSession,
+  onRenameSession,
   activeSessionId,
 }: {
   user: UserData;
@@ -63,15 +90,125 @@ function SidebarContent({
   onClose?: () => void;
   onAbout: () => void;
   onSelectSession: (id: string) => void;
-  onDeleteSession?: (id: string) => void;
+  onDeleteSession?: (id: string) => void | Promise<void>;
+  onRenameSession?: (id: string, title: string) => void | Promise<void>;
   activeSessionId?: string;
 }) {
-  const filteredSessions = sessions.filter((s) =>
-    s.title.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const [pinnedSessionIds, setPinnedSessionIds] = useState<string[]>(() => loadPinnedSessionIds());
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(PINNED_SESSIONS_STORAGE_KEY, JSON.stringify(pinnedSessionIds));
+  }, [pinnedSessionIds]);
+
+  const filteredSessions = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    return sessions.filter((s) => s.title.toLowerCase().includes(normalizedQuery));
+  }, [sessions, searchQuery]);
+
+  const pinnedSessions = filteredSessions.filter((session) => pinnedSessionIds.includes(session.id));
+  const regularSessions = filteredSessions.filter((session) => !pinnedSessionIds.includes(session.id));
 
   const displayName = user?.name || "Usuário";
   const displayEmail = user?.email || "";
+
+  const togglePinned = (sessionId: string) => {
+    setPinnedSessionIds((prev) =>
+      prev.includes(sessionId)
+        ? prev.filter((id) => id !== sessionId)
+        : [sessionId, ...prev]
+    );
+  };
+
+  const handleRename = async (session: ChatSession) => {
+    const nextTitle = window.prompt("Renomear conversa", session.title)?.trim();
+    if (!nextTitle || nextTitle === session.title) return;
+    await onRenameSession?.(session.id, nextTitle);
+  };
+
+  const handleShare = async (session: ChatSession) => {
+    const url = `${window.location.origin}/chat?conversation=${encodeURIComponent(session.id)}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: session.title, text: `Conversa Zarith: ${session.title}`, url });
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      window.alert("Link da conversa copiado para a área de transferência.");
+    } catch {
+      window.prompt("Copie o link da conversa", url);
+    }
+  };
+
+  const handleDelete = async (sessionId: string) => {
+    await onDeleteSession?.(sessionId);
+    setPinnedSessionIds((prev) => prev.filter((id) => id !== sessionId));
+  };
+
+  const renderSessionRow = (session: ChatSession) => {
+    const isPinned = pinnedSessionIds.includes(session.id);
+
+    return (
+      <div
+        key={session.id}
+        onClick={() => onSelectSession(session.id)}
+        className={`group flex items-center gap-2 px-3 py-2.5 rounded-xl cursor-pointer transition-all ${
+          activeSessionId === session.id
+            ? "bg-[var(--bg-card-hover)] border border-[var(--border-glow)]"
+            : "hover:bg-[var(--bg-card-hover)]"
+        }`}
+        title={isCollapsed ? session.title : undefined}
+      >
+        <MessageSquare size={16} className="text-[#00f5ff] shrink-0" />
+        {!isCollapsed && (
+          <>
+            <p className="text-sm font-medium truncate text-[var(--text-primary)] flex-1 text-left">
+              {session.title}
+            </p>
+            {isPinned && <Pin size={12} className="text-[#00f5ff] shrink-0" />}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  onClick={(event) => event.stopPropagation()}
+                  className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1.5 rounded-lg hover:bg-white/10 text-[var(--text-secondary)] hover:text-[#00f5ff] transition-all shrink-0"
+                  title="Mais opções"
+                  aria-label={`Mais opções para ${session.title}`}
+                >
+                  <MoreHorizontal size={15} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="w-56 border border-[var(--border-glow)] bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-2xl shadow-black/40"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <DropdownMenuItem onClick={() => togglePinned(session.id)} className="cursor-pointer gap-2">
+                  {isPinned ? <PinOff size={14} /> : <Pin size={14} />}
+                  {isPinned ? "Remover dos fixados" : "Fixar"}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleRename(session)} className="cursor-pointer gap-2">
+                  <Pencil size={14} />
+                  Renomear
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleShare(session)} className="cursor-pointer gap-2">
+                  <Share2 size={14} />
+                  Compartilhar
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => handleDelete(session.id)}
+                  className="cursor-pointer gap-2 text-[#ff4d8d] focus:text-[#ff4d8d]"
+                >
+                  <Trash2 size={14} />
+                  Apagar
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="h-full flex flex-col bg-[var(--bg-secondary)] overflow-hidden">
@@ -88,6 +225,7 @@ function SidebarContent({
             <button
               onClick={onClose}
               className="p-2 hover:bg-[var(--bg-card-hover)] rounded-lg text-[var(--text-secondary)] transition-colors md:hidden"
+              aria-label="Fechar menu"
             >
               <X size={18} />
             </button>
@@ -132,9 +270,18 @@ function SidebarContent({
       )}
 
       {/* Sessions list */}
-      <div className="flex-1 overflow-y-auto px-2 space-y-4 min-h-0">
+      <div className="flex-1 overflow-y-auto px-2 space-y-4 min-h-0 pb-3">
+        {pinnedSessions.length > 0 && !isCollapsed && (
+          <div className="space-y-1">
+            <h3 className="px-3 text-[10px] font-bold text-[#00f5ff] uppercase tracking-widest py-1">
+              FIXADOS
+            </h3>
+            {pinnedSessions.map(renderSessionRow)}
+          </div>
+        )}
+
         {(["Hoje", "Ontem", "Semana passada", "Mais antigos"] as const).map((group) => {
-          const groupSessions = filteredSessions.filter((s) => s.group === group);
+          const groupSessions = regularSessions.filter((s) => s.group === group);
           if (groupSessions.length === 0) return null;
           return (
             <div key={group} className="space-y-1">
@@ -143,37 +290,7 @@ function SidebarContent({
                   {group}
                 </h3>
               )}
-              {groupSessions.map((session) => (
-                <div
-                  key={session.id}
-                  onClick={() => onSelectSession(session.id)}
-                  className={`group flex items-center gap-2 px-3 py-2.5 rounded-xl cursor-pointer transition-all ${
-                    activeSessionId === session.id
-                      ? "bg-[var(--bg-card-hover)] border border-[var(--border-glow)]"
-                      : "hover:bg-[var(--bg-card-hover)]"
-                  }`}
-                  title={isCollapsed ? session.title : undefined}
-                >
-                  <MessageSquare size={16} className="text-[#00f5ff] shrink-0" />
-                  {!isCollapsed && (
-                    <>
-                      <p className="text-sm font-medium truncate text-[var(--text-primary)] flex-1 text-left">
-                        {session.title}
-                      </p>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDeleteSession?.(session.id);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 p-1 hover:text-[#ff0080] text-[var(--text-secondary)] transition-all shrink-0"
-                        title="Remover"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </>
-                  )}
-                </div>
-              ))}
+              {groupSessions.map(renderSessionRow)}
             </div>
           );
         })}
@@ -188,7 +305,7 @@ function SidebarContent({
       </div>
 
       {/* Footer */}
-      <div className="p-3 border-t border-[var(--border-glow)] space-y-1 shrink-0">
+      <div className="p-3 border-t border-[var(--border-glow)] space-y-1 shrink-0 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:pb-3">
         {/* About */}
         <button
           onClick={onAbout}
@@ -243,6 +360,7 @@ export function Sidebar({
   activeSessionId,
   onSelectSession,
   onDeleteSession,
+  onRenameSession,
 }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -254,7 +372,7 @@ export function Sidebar({
       {/* ── Mobile: Hamburguer button ── */}
       <button
         onClick={() => setMobileOpen(true)}
-        className="md:hidden fixed top-3 left-3 z-40 p-2.5 bg-[var(--bg-secondary)] border border-[var(--border-glow)] rounded-xl text-[#00f5ff] shadow-lg"
+        className="md:hidden fixed top-[calc(0.75rem+env(safe-area-inset-top))] left-3 z-40 p-2.5 bg-[var(--bg-secondary)] border border-[var(--border-glow)] rounded-xl text-[#00f5ff] shadow-lg"
         aria-label="Abrir menu"
       >
         <Menu size={20} />
@@ -278,7 +396,7 @@ export function Sidebar({
               animate={{ x: 0 }}
               exit={{ x: "-100%" }}
               transition={{ type: "spring", damping: 26, stiffness: 280 }}
-              className="md:hidden fixed left-0 top-0 bottom-0 z-50 w-72 border-r border-[var(--border-glow)]"
+              className="md:hidden fixed left-0 top-0 bottom-0 z-50 w-[min(88vw,20rem)] border-r border-[var(--border-glow)]"
             >
               <SidebarContent
                 user={user}
@@ -301,6 +419,7 @@ export function Sidebar({
                   setMobileOpen(false);
                 }}
                 onDeleteSession={onDeleteSession}
+                onRenameSession={onRenameSession}
                 activeSessionId={activeSessionId}
               />
             </motion.div>
@@ -312,7 +431,7 @@ export function Sidebar({
       <motion.div
         animate={{ width: isCollapsed ? 72 : 272 }}
         transition={{ duration: 0.22, ease: "easeInOut" }}
-        className="hidden md:flex h-screen shrink-0 border-r border-[var(--border-glow)] overflow-hidden"
+        className="hidden md:flex h-[100dvh] shrink-0 border-r border-[var(--border-glow)] overflow-hidden"
       >
         <SidebarContent
           user={user}
@@ -325,6 +444,7 @@ export function Sidebar({
           onAbout={() => setAboutOpen(true)}
           onSelectSession={onSelectSession}
           onDeleteSession={onDeleteSession}
+          onRenameSession={onRenameSession}
           activeSessionId={activeSessionId}
         />
       </motion.div>

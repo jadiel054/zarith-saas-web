@@ -740,7 +740,7 @@ export default function ChatPage() {
   const [authChecked, setAuthChecked] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
 
-  const { sessions, createNewSession, saveChatMessage, loadMessages, deleteSession } = useChatPersistence();
+  const { sessions, createNewSession, saveChatMessage, loadMessages, renameSession, deleteSession } = useChatPersistence();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -819,6 +819,11 @@ export default function ChatPage() {
     destructiveApprovalResolverRef.current = null;
     setAttachedImages([]);
   }, []);
+
+  const handleRenameSession = useCallback(async (id: string, title: string) => {
+    await renameSession(id, title);
+    addLog("success", `Conversa renomeada para: ${title}`);
+  }, [renameSession, addLog]);
 
   const handleDeleteSession = useCallback(async (id: string) => {
     await deleteSession(id);
@@ -1652,7 +1657,7 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
   );
 
   return (
-    <div className="flex h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] overflow-hidden">
+    <div className="flex h-[100dvh] w-full bg-[var(--bg-primary)] text-[var(--text-primary)] overflow-hidden">
       <Sidebar 
         user={userData} 
         onNewChat={handleNewChat}
@@ -1660,12 +1665,13 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
         activeSessionId={currentSessionId || undefined}
         onSelectSession={loadConversation}
         onDeleteSession={handleDeleteSession}
+        onRenameSession={handleRenameSession}
       />
 
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 w-full overflow-hidden">
 
         {/* Header */}
-        <header className="h-14 md:h-16 border-b border-[var(--border-glow)] flex items-center px-4 md:px-6 bg-[var(--bg-secondary)] gap-3 shrink-0">
+        <header className="h-14 md:h-16 border-b border-[var(--border-glow)] flex items-center px-3 sm:px-4 md:px-6 bg-[var(--bg-secondary)] gap-3 shrink-0">
           <div className="w-10 md:hidden shrink-0" />
           <div className="flex-1" />
 
@@ -1845,7 +1851,7 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
           ) : (
             <div className="flex flex-col min-h-full">
               {/* Messages list */}
-              <div className="p-4 md:p-6 space-y-5 max-w-4xl mx-auto w-full">
+              <div className="px-3 py-4 sm:p-4 md:p-6 space-y-4 md:space-y-5 max-w-4xl mx-auto w-full">
                 <AnimatePresence>
                   {messages.map((message) => (
                     <motion.div
@@ -1854,7 +1860,7 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
                       animate={{ opacity: 1, y: 0 }}
                       className={`flex gap-3 md:gap-4 ${message.role === "user" ? "justify-end" : "justify-start"}`}
                     >
-                      <div className={`flex gap-3 md:gap-4 w-full max-w-2xl ${message.role === "user" ? "flex-row-reverse" : ""} group`}>
+                      <div className={`flex gap-2.5 md:gap-4 w-full max-w-full sm:max-w-2xl ${message.role === "user" ? "flex-row-reverse" : ""} group`}>
                         {message.role === "assistant" && (
                           <div className="w-7 h-7 md:w-8 md:h-8 rounded-full bg-gradient-to-br from-[#00f5ff] to-[#bf00ff] flex items-center justify-center text-black font-bold text-xs shrink-0">
                             Z
@@ -1862,7 +1868,7 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
                         )}
                         <div className={`flex flex-col gap-2 flex-1 ${message.role === "user" ? "items-end" : ""}`}>
                           <div
-                            className={`px-4 py-3 rounded-2xl text-sm leading-relaxed max-w-full overflow-x-auto ${
+                            className={`px-3.5 py-3 md:px-4 rounded-2xl text-sm leading-relaxed max-w-full overflow-x-auto break-words ${
                               message.role === "user"
                                 ? "bg-[#00f5ff]/20 border border-[#00f5ff]/30 text-white"
                                 : message.isError
@@ -1933,7 +1939,7 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
         </main>
 
         {/* Input area */}
-        <footer className="p-3 md:p-5 bg-gradient-to-t from-[var(--bg-primary)] via-[var(--bg-primary)]/95 to-transparent shrink-0">
+        <footer className="px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 md:p-5 bg-gradient-to-t from-[var(--bg-primary)] via-[var(--bg-primary)]/95 to-transparent shrink-0">
           <div className="max-w-4xl mx-auto">
             <AnimatePresence>
               {isPlannerOpen && (
@@ -1996,7 +2002,7 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
 
             <div className="relative group">
               <div className="absolute -inset-0.5 bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] rounded-[24px] blur opacity-20 group-focus-within:opacity-40 transition duration-500" />
-              <div className="relative flex items-end gap-2 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-[22px] shadow-2xl p-2 transition-all group-focus-within:border-[#00f5ff]/50">
+              <div className="relative flex flex-wrap sm:flex-nowrap items-end gap-2 bg-[var(--bg-card)] border border-[var(--border-glow)] rounded-[22px] shadow-2xl p-2 transition-all group-focus-within:border-[#00f5ff]/50">
                 <input
                   type="file"
                   ref={fileInputRef}
@@ -2020,7 +2026,7 @@ Instrução de continuidade: este resultado já está no contexto. Não chame no
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Manda a parada, Jadiel... pode anexar print, erro ou wireframe."
-                  className="flex-1 min-w-0 bg-transparent border-none focus:ring-0 text-sm md:text-base px-2 py-3 resize-none min-h-[44px] max-h-32 scrollbar-hide text-white placeholder-white/30 font-medium"
+                  className="order-2 sm:order-none flex-[1_1_100%] sm:flex-1 min-w-0 bg-transparent border-none focus:ring-0 text-sm md:text-base px-2 py-3 resize-none min-h-[44px] max-h-32 scrollbar-hide text-white placeholder-white/30 font-medium"
                 />
 
                 <div className="relative shrink-0">

@@ -55,6 +55,15 @@ export function useChatPersistence() {
     }
   }, [sessions, refreshSessions]);
 
+  const renameSession = useCallback(async (id: string, title: string) => {
+    const { data, error } = await conversationsService.updateConversation(id, title);
+    if (!error && data) {
+      setSessions(prev => prev.map(s => s.id === id ? data : s));
+    } else {
+      console.error("Erro ao renomear sessão:", error);
+    }
+  }, []);
+
   const deleteSession = useCallback(async (id: string) => {
     const { error } = await conversationsService.deleteConversation(id);
     if (!error) {
@@ -71,6 +80,7 @@ export function useChatPersistence() {
     loadMessages,
     createNewSession,
     saveChatMessage,
+    renameSession,
     deleteSession
   };
 }
