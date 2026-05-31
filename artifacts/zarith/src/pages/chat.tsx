@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Send,
   Copy,
@@ -206,8 +208,7 @@ REGRAS DE SEGURANÇA
 REGRAS DE APRESENTAÇÃO DE RESULTADOS
 ═══════════════════════════════════════
 - SEMPRE apresente resultados de ferramentas em formato Markdown organizado.
-- NUNCA exiba JSON cru para o usuário.
-- Para listas de repositórios, use tabelas: **Nome** | Linguagem | Visibilidade | Link.
+- REGRA ABSOLUTA: Nunca exiba JSON bruto. Sempre formate resultados de tools em Markdown com tabelas ou listas organizadas. Mostre apenas: nome, descrição, linguagem, visibilidade e link.
 - Para conteúdos de arquivos, use blocos de código com a linguagem correta.
 - Para erros, use citações em vermelho ou blocos de aviso legíveis.`;
 
@@ -863,11 +864,20 @@ export default function ChatPage() {
           ));
         }
 
-        const toolContext = executedToolCalls.map((call) => ({
-          tool: call.name,
-          status: call.status,
-          result: call.result
-        }));
+        // Pré-processamento simplificado para o contexto do modelo (evitar JSON gigante)
+        const simplifiedToolResults = executedToolCalls.map(call => {
+          if (call.status === "error") return `Erro em ${call.name}: ${call.result?.error || 'Erro desconhecido'}`;
+          
+          const res = call.result;
+          if (call.name === "github/list-repos" && Array.isArray(res)) {
+            return `Repositórios encontrados:\n${res.map((r: any) => `- ${r.name} | ${r.language || 'N/A'} | ${r.private ? 'Privado' : 'Público'} | ${r.html_url}`).join("\n")}`;
+          }
+          if (call.name === "github/read-file") {
+            return `Conteúdo de ${call.args?.path}:\n${res.content || res}`;
+          }
+          return `${call.name} executado com sucesso.`;
+        }).join("\n\n---\n\n");
+
         const toolSummary = `
 
 ---
@@ -880,8 +890,8 @@ ${executedToolCalls.map(call => {
   const res = call.result;
   if (call.name === "github/list-repos" && Array.isArray(res)) {
     const table = "| **Nome** | Linguagem | Visibilidade | Link |\n| :--- | :--- | :--- | :--- |\n" + 
-      res.slice(0, 10).map((r: any) => `| **${r.name}** | ${r.language || 'N/A'} | ${r.private ? 'Privado' : 'Público'} | [Ver](${r.html_url})`).join("\n");
-    return `### 📂 Repositórios Encontrados\n${table}${res.length > 10 ? `\n\n*...e mais ${res.length - 10} repositórios.*` : ""}`;
+      res.slice(0, 20).map((r: any) => `| **${r.name}** | ${r.language || 'N/A'} | ${r.private ? 'Privado' : 'Público'} | [Ver](${r.html_url})`).join("\n");
+    return `### 📂 Repositórios Encontrados\n${table}${res.length > 20 ? `\n\n*...e mais ${res.length - 20} repositórios.*` : ""}`;
   }
   
   if (call.name === "github/read-file") {
@@ -1254,7 +1264,11 @@ ${executedToolCalls.map(call => {
                               : "bg-[var(--bg-card)] border border-[var(--border-glow)] text-[var(--text-primary)]"
                           }`}
                         >
-                          {message.content}
+                          <div className="prose prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {message.content}
+                            </ReactMarkdown>
+                          </div>
                         </div>
 
                         {/* Tool Call Stream */}
