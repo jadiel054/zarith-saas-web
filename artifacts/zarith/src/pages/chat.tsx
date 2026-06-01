@@ -176,6 +176,16 @@ Se o contexto ativo enviado pelo frontend trouxer repositório, branch
 ou stack, use esses dados como padrão para tools GitHub, Supabase e
 Vercel, a menos que o usuário indique outro alvo explicitamente.
 
+OTIMIZAÇÃO DE REPOSITÓRIOS:
+Quando o usuário mencionar um repositório específico (ex: "zarith-saas-web"),
+NÃO use github/list-repos para listar todos os repositórios. Em vez disso:
+- Use github/get-tree para acessar diretamente a estrutura do repositório mencionado
+- Use github/get-file para ler arquivos específicos
+- Use github/search-code para buscar dentro do repositório específico
+Liste repositórios APENAS se o usuário pedir explicitamente "listar meus repos"
+ou "quais são meus repositórios". Caso contrário, trabalhe direto com o
+repositório mencionado para ser mais eficiente.
+
 ═══════════════════════════════════════
 REGRAS DE SEGURANÇA
 ═══════════════════════════════════════
@@ -1145,9 +1155,10 @@ ${errorNotice}` : errorNotice;
     });
 
     try {
-      const groqKey   = getApiKey("zarith_apikey_Groq", import.meta.env.VITE_GROQ_API_KEY);
-      const geminiKey = getApiKey("zarith_apikey_Gemini", import.meta.env.VITE_GEMINI_API_KEY);
-      const orKey     = getApiKey("zarith_apikey_OpenRouter", import.meta.env.VITE_OPENROUTER_API_KEY);
+      // Refresh de chaves a cada execução para garantir que chaves recém-salvas sejam reconhecidas
+      let groqKey   = getApiKey("zarith_apikey_Groq", import.meta.env.VITE_GROQ_API_KEY);
+      let geminiKey = getApiKey("zarith_apikey_Gemini", import.meta.env.VITE_GEMINI_API_KEY);
+      let orKey     = getApiKey("zarith_apikey_OpenRouter", import.meta.env.VITE_OPENROUTER_API_KEY);
 
       const history: AgentHistoryMessage[] = messages.slice(-12).map((m) => ({
         role: m.role,
@@ -1172,6 +1183,11 @@ ${errorNotice}` : errorNotice;
         signal: AbortSignal
       ): Promise<string | null> => {
         try {
+          // Refresh de chaves a cada iteração para capturar atualizações em tempo real
+          groqKey   = getApiKey("zarith_apikey_Groq", import.meta.env.VITE_GROQ_API_KEY);
+          geminiKey = getApiKey("zarith_apikey_Gemini", import.meta.env.VITE_GEMINI_API_KEY);
+          orKey     = getApiKey("zarith_apikey_OpenRouter", import.meta.env.VITE_OPENROUTER_API_KEY);
+          
           const providerMessages = runHistory.map(toProviderMessage);
 
           if (modelId === "groq" && groqKey) {
@@ -1299,7 +1315,7 @@ ${errorNotice}` : errorNotice;
       let executedToolCalls: ToolCall[] = [];
       let continueLoop = true;
       let loopCount = 0;
-      const maxAgentLoops = 8;
+      const maxAgentLoops = 16;
       const executedToolSignatures = new Set<string>();
       const buildToolSignature = (name: string, args: unknown) => {
         const normalize = (value: unknown): unknown => {
@@ -1347,7 +1363,8 @@ ${errorNotice}` : errorNotice;
         }
 
         if (!fullResponse) {
-          fullResponse = `⚠️ Nenhuma chave de API configurada ou modelo disponível para **${selectedModelForRun.name}**, Jadiel. Vai em **Configurações → API Keys** e bota a chave lá. Sem chave, sem resposta — é assim que funciona. Erro: ${lastError}`;
+          const errorDetail = lastError ? ` (${lastError})` : "";
+          fullResponse = `⚠️ Nenhuma chave de API configurada ou modelo disponível para **${selectedModelForRun.name}**, Jadiel. Vai em **Configurações → API Keys** e bota a chave lá. Sem chave, sem resposta — é assim que funciona${errorDetail}.`;
         }
 
         const rawDetectedToolRequests = parseToolCallsFromText(fullResponse);
