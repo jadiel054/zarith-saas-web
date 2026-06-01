@@ -131,14 +131,21 @@ Também é aceito o formato equivalente com name/args dentro de [TOOL_CALL].
 ✓ Pesquisar bibliotecas, frameworks, documentações
 
 ── MODELOS DE IA ───────────────────────
-Você decide automaticamente qual modelo usar baseado na tarefa:
+PRIORIDADE: Respeite SEMPRE a seleção manual do usuário. Só use seleção automática se o usuário não escolheu explicitamente.
+
+Seleção automática baseada na tarefa:
 - Chat rápido/respostas → Groq (Llama 3.3 70B)
 - Geração de código → Qwen Coder 480B via OpenRouter
 - Raciocínio/debug complexo → DeepSeek R1 via OpenRouter
 - Contexto massivo/análise de repo inteiro → Gemini Flash
 - Tarefas longas e autônomas → GLM 5.1
 
-Se o modelo escolhido falhar, use Groq como fallback automático e informe ao usuário qual modelo foi usado e por que houve fallback.
+Fallback em cascata (se o modelo principal falhar):
+1. Tentar GLM 5.1 (mais robusto para rate limits e timeouts)
+2. Se GLM falhar, tentar Groq como último recurso
+3. Informar ao usuário qual modelo foi usado e por que houve fallback
+
+IMPORTANTE: Se o usuário selecionou um modelo específico (ex: GLM), NÃO mude para outro modelo automaticamente. Use exatamente o que ele escolheu.
 
 ═══════════════════════════════════════
 FLUXO PARA CRIAR SISTEMAS
@@ -1024,7 +1031,11 @@ export default function ChatPage() {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    const selectedModel = selectAutomaticModel(userContent, activeAttachments.length, webSearchEnabled);
+    // Priorizar seleção do usuário: se activeModel foi escolhido manualmente, usar ele
+    // Caso contrário, usar seleção automática
+    const isUserSelectedModel = activeModel.id !== "groq" && activeModel.id !== "qwen"; // Assume que se não é groq/qwen, foi manual
+    const selectedModel = isUserSelectedModel ? activeModel : selectAutomaticModel(userContent, activeAttachments.length, webSearchEnabled);
+    
     if (selectedModel.id !== activeModel.id) {
       setActiveModel(selectedModel);
       addLog("info", `Modelo selecionado automaticamente: ${selectedModel.name} — ${selectedModel.desc}`);
@@ -1342,10 +1353,11 @@ ${errorNotice}` : errorNotice;
 
         let fullResponse = await tryModel(selectedModelForRun.id, selectedModelForRun.name, agentHistory, controller.signal) ?? "";
 
-        if (!fullResponse && selectedModelForRun.id !== "groq") {
-          const fallbackModel = getModelById("groq");
+        // Fallback inteligente: tentar GLM 5.1 primeiro se o modelo principal falhar
+        if (!fullResponse && selectedModelForRun.id !== "glm") {
+          const fallbackModel = getModelById("glm");
           const failureReason = lastError || "erro desconhecido";
-          addLog("error", `${selectedModelForRun.name} falhou (${failureReason}). Tentando fallback automático com Groq.`);
+          addLog("error", `${selectedModelForRun.name} falhou (${failureReason}). Tentando fallback automático com ${fallbackModel.name}.`);
           setMessages((prev) => {
             const updated = [...prev];
             const last = updated[updated.length - 1];
@@ -1359,6 +1371,24 @@ ${errorNotice}` : errorNotice;
           if (fullResponse) {
             usedModel = fallbackModel;
             fullResponse = `> ⚠️ **Fallback automático:** ${selectedModelForRun.name} falhou (${failureReason}). Usei ${fallbackModel.name} como fallback para concluir a tarefa.\n\n${fullResponse}`;
+          } else if (selectedModelForRun.id !== "groq") {
+            // Se GLM também falhar e não for Groq, tentar Groq como último recurso
+            const lastFallback = getModelById("groq");
+            addLog("error", `${fallbackModel.name} também falhou. Tentando último fallback com ${lastFallback.name}.`);
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last?.role === "assistant") {
+                last.content = `${finalContent}\n\n⚠️ ${fallbackModel.name} também falhou. Tentando último fallback com ${lastFallback.name}...`.trim();
+                last.model = lastFallback.name;
+              }
+              return updated;
+            });
+            fullResponse = await tryModel(lastFallback.id, lastFallback.name, agentHistory, controller.signal) ?? "";
+            if (fullResponse) {
+              usedModel = lastFallback;
+              fullResponse = `> ⚠️ **Fallback em cascata:** ${selectedModelForRun.name} e ${fallbackModel.name} falharam. Usei ${lastFallback.name} como último recurso.\n\n${fullResponse}`;
+            }
           }
         }
 
