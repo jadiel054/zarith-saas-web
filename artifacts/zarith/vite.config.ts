@@ -31,14 +31,14 @@ export default defineConfig(async () => {
     {
       name: "zarith-service-worker-build-version",
       apply: "build",
-      async closeBundle() {
-        const serviceWorkerPath = path.resolve(import.meta.dirname, "dist/public/service-worker.js");
-        const serviceWorker = await readFile(serviceWorkerPath, "utf8");
-        await writeFile(
-          serviceWorkerPath,
-          serviceWorker.replaceAll("__ZARITH_BUILD_VERSION__", buildVersion),
-          "utf8"
-        );
+      generateBundle(options, bundle) {
+        const serviceWorkerFileName = "service-worker.js";
+        const serviceWorkerAsset = bundle[serviceWorkerFileName];
+
+        if (serviceWorkerAsset && serviceWorkerAsset.type === 'asset') {
+          const originalContent = serviceWorkerAsset.source.toString();
+          serviceWorkerAsset.source = originalContent.replaceAll("__ZARITH_BUILD_VERSION__", buildVersion);
+        }
       },
     },
   ];
