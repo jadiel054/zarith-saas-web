@@ -30,15 +30,15 @@ export const QUICK_ACTIONS: QuickAction[] = [
   {
     icon: "🔍",
     title: "Analisar Repositórios",
-    description: "Análise completa do GitHub",
-    message: "Zarith, lista e analisa todos os repositórios de jadiel054 no GitHub.",
+    description: "Análise completa do código",
+    message: "Zarith, analisa os repositórios e me mostra um resumo visual.",
     gradient: "from-[rgba(0,245,255,0.12)] to-[rgba(191,0,255,0.08)]",
     glow: "rgba(0,245,255,0.25)",
   },
   {
     icon: "⚡",
     title: "Gerar Código",
-    description: "Qualquer linguagem e contexto",
+    description: "Implementação e geração",
     message: "Zarith, preciso gerar código. Me pergunta a linguagem, objetivo e contexto.",
     gradient: "from-[rgba(255,204,0,0.12)] to-[rgba(255,204,0,0.03)]",
     glow: "rgba(255,204,0,0.25)",

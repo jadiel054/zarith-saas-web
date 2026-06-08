@@ -214,9 +214,9 @@ function SidebarContent({
   return (
     <div className="h-full flex flex-col bg-[var(--bg-secondary)] overflow-hidden">
       {/* Top bar */}
-      <div className="p-4 flex items-center justify-between shrink-0 border-b border-[var(--border-glow)]">
+      <div className="px-4 py-3 flex items-center justify-between shrink-0 border-b border-[var(--border-glow)]">
         {!isCollapsed && (
-          <span className="font-orbitron font-black text-xl bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] bg-clip-text text-transparent whitespace-nowrap">
+          <span className="font-orbitron font-black text-lg bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] bg-clip-text text-transparent whitespace-nowrap">
             ZARITH
           </span>
         )}
@@ -225,44 +225,44 @@ function SidebarContent({
           {onClose && (
             <button
               onClick={onClose}
-              className="p-2 hover:bg-[var(--bg-card-hover)] rounded-lg text-[var(--text-secondary)] transition-colors md:hidden"
+              className="p-1.5 hover:bg-[var(--bg-card-hover)] rounded-lg text-[var(--text-secondary)] transition-colors md:hidden"
               aria-label="Fechar menu"
             >
-              <X size={18} />
+              <X size={16} />
             </button>
           )}
           {/* Colapsar desktop */}
           <button
             onClick={() => setIsCollapsed(!isCollapsed)}
-            className="p-2 hover:bg-[var(--bg-card-hover)] rounded-lg text-[#00f5ff] transition-colors hidden md:flex"
+            className="p-1.5 hover:bg-[var(--bg-card-hover)] rounded-lg text-[#00f5ff] transition-colors hidden md:flex"
             title={isCollapsed ? "Expandir" : "Recolher"}
           >
-            {isCollapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
+            {isCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
           </button>
         </div>
       </div>
 
       {/* New chat button */}
-      <div className="px-3 py-3 shrink-0">
+      <div className="px-3 py-2.5 shrink-0">
         <button
           onClick={onNewChat}
-          className="w-full py-3 bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] rounded-xl flex items-center justify-center gap-2 font-bold text-[var(--bg-primary)] hover:brightness-110 transition-all shadow-[0_0_12px_rgba(0,245,255,0.25)]"
+          className="w-full py-2.5 bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] rounded-xl flex items-center justify-center gap-2 font-bold text-[var(--bg-primary)] hover:brightness-110 transition-all shadow-[0_0_12px_rgba(0,245,255,0.25)] text-sm"
           title="Nova conversa"
         >
-          <Plus size={20} />
+          <Plus size={18} />
           {!isCollapsed && <span>Nova Conversa</span>}
         </button>
       </div>
 
       {/* Search */}
       {!isCollapsed && (
-        <div className="px-3 mb-3 shrink-0">
+        <div className="px-3 mb-2 shrink-0">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" size={15} />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" size={14} />
             <input
               type="text"
               placeholder="Buscar histórico..."
-              className="w-full bg-[var(--bg-primary)] border border-[var(--border-glow)] rounded-lg py-2 pl-9 pr-4 text-sm focus:outline-none focus:border-[#00f5ff] transition-all"
+              className="w-full bg-[var(--bg-primary)] border border-[var(--border-glow)] rounded-lg py-1.5 pl-8 pr-3 text-xs focus:outline-none focus:border-[#00f5ff] transition-all"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -271,7 +271,7 @@ function SidebarContent({
       )}
 
       {/* Sessions list */}
-      <div className="flex-1 overflow-y-auto px-2 space-y-4 min-h-0 pb-3">
+      <div className="flex-1 overflow-y-auto px-2 space-y-3 min-h-0 pb-3">
         {pinnedSessions.length > 0 && !isCollapsed && (
           <div className="space-y-1">
             <h3 className="px-3 text-[10px] font-bold text-[#00f5ff] uppercase tracking-widest py-1">
@@ -306,14 +306,14 @@ function SidebarContent({
       </div>
 
       {/* Footer */}
-      <div className="p-3 border-t border-[var(--border-glow)] space-y-1 shrink-0 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:pb-3">
+      <div className="p-2.5 border-t border-[var(--border-glow)] space-y-1 shrink-0 pb-[calc(0.5rem+env(safe-area-inset-bottom))] md:pb-2.5">
         {/* About */}
         <button
           onClick={onAbout}
-          className="w-full flex items-center gap-3 p-2.5 hover:bg-[var(--bg-card-hover)] rounded-xl transition-all text-[var(--text-secondary)] hover:text-[#00f5ff]"
+          className="w-full flex items-center gap-3 p-2 hover:bg-[var(--bg-card-hover)] rounded-lg transition-all text-[var(--text-secondary)] hover:text-[#00f5ff]"
           title="Sobre a Zarith"
         >
-          <Info size={18} className="shrink-0" />
+          <Info size={16} className="shrink-0" />
           {!isCollapsed && (
             <span className="text-xs font-bold">Sobre</span>
           )}
@@ -322,10 +322,10 @@ function SidebarContent({
         {/* User / Settings */}
         <Link
           href="/settings"
-          className="flex items-center gap-3 p-2 hover:bg-[var(--bg-card-hover)] rounded-xl transition-all"
+          className="flex items-center gap-3 p-2 hover:bg-[var(--bg-card-hover)] rounded-lg transition-all"
           title={isCollapsed ? "Configurações" : undefined}
         >
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#00f5ff] to-[#bf00ff] flex items-center justify-center shrink-0 overflow-hidden">
+          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#00f5ff] to-[#bf00ff] flex items-center justify-center shrink-0 overflow-hidden">
             {user?.avatarUrl ? (
               <img
                 src={user.avatarUrl}
@@ -334,7 +334,7 @@ function SidebarContent({
                 onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
               />
             ) : (
-              <User size={16} className="text-white" />
+              <User size={14} className="text-white" />
             )}
           </div>
           {!isCollapsed && (
@@ -345,7 +345,7 @@ function SidebarContent({
                   {displayEmail || "Configurações"}
                 </p>
               </div>
-              <Settings size={15} className="text-[var(--text-secondary)] shrink-0" />
+              <Settings size={14} className="text-[var(--text-secondary)] shrink-0" />
             </>
           )}
         </Link>
