@@ -78,12 +78,12 @@ export const QUICK_ACTIONS: QuickAction[] = [
 ];
 
 interface ActionCardsProps {
-  userName: string;
-  onAction: (message: string) => void;
+  onSelectAction: (message: string) => void;
+  
   forceMobileLayout?: boolean;
 }
 
-export function ActionCards({ userName, onAction, forceMobileLayout = false }: ActionCardsProps) {
+export function ActionCards({ onSelectAction, forceMobileLayout = false }: ActionCardsProps) {
   const handleCardClick = async (action: QuickAction) => {
     // Valida sessão antes de disparar
     if (supabaseClient) {
@@ -93,7 +93,7 @@ export function ActionCards({ userName, onAction, forceMobileLayout = false }: A
         return;
       }
     }
-    onAction(action.message);
+    onSelectAction(action.message);
   };
 
   return (
