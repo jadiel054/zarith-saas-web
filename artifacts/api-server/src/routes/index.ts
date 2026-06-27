@@ -7,6 +7,7 @@ import vercelRouter from "./vercel";
 import visionRouter from "./vision";
 import webRouter from "./web";
 import filesRouter from "./files";
+import chatRouter from "./chat";
 
 const router: IRouter = Router();
 
@@ -18,5 +19,6 @@ router.use("/vercel", vercelRouter);
 router.use("/vision", visionRouter);
 router.use("/web", webRouter);
 router.use("/files", filesRouter);
+router.use("/chat", chatRouter);
 
 export default router;
