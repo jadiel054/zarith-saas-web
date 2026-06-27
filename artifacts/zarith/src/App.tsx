@@ -10,7 +10,7 @@ import SettingsPage from "@/pages/settings";
 import MemoriesPage from "@/pages/memories";
 import AdminPage from "@/pages/admin";
 import AuthCallbackPage from "@/pages/auth-callback";
-import { supabaseClient } from "@/lib/supabase";
+import { getSessionWithTimeout, supabaseClient } from "@/lib/supabase";
 import { useState, useEffect } from "react";
 
 const queryClient = new QueryClient({
@@ -87,23 +87,69 @@ function AuthGuard({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<"checking" | "authenticated" | "unauthenticated">("checking");
 
   useEffect(() => {
+    let isMounted = true;
+    let authEventResolved = false;
+
+    const updateStatus = (
+      nextStatus: "authenticated" | "unauthenticated",
+      reason: string,
+    ) => {
+      if (!isMounted) return;
+
+      console.info("[AuthGuard] Atualizando status.", { nextStatus, reason });
+      setStatus((currentStatus) => (currentStatus === nextStatus ? currentStatus : nextStatus));
+    };
+
     if (!supabaseClient) {
-      // Modo sem Supabase configurado — permite acesso livre
-      setStatus("authenticated");
+      console.info("[AuthGuard] Supabase ausente; liberando acesso local.");
+      updateStatus("authenticated", "supabase ausente");
       return;
     }
 
-    // Verifica sessão ativa
-    supabaseClient.auth.getSession().then(({ data: { session } }) => {
-      setStatus(session ? "authenticated" : "unauthenticated");
-    });
+    console.info("[AuthGuard] Iniciando bootstrap de autenticação.");
 
     // Ouve mudanças de estado de autenticação (logout em outras abas, expiração de token)
-    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => {
-      setStatus(session ? "authenticated" : "unauthenticated");
+    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((event, session) => {
+      authEventResolved = true;
+      console.info("[AuthGuard] Evento de autenticação recebido.", {
+        event,
+        hasSession: Boolean(session),
+      });
+      updateStatus(session ? "authenticated" : "unauthenticated", `evento ${event}`);
     });
 
-    return () => subscription.unsubscribe();
+    void (async () => {
+      try {
+        const { session, error, timedOut } = await getSessionWithTimeout();
+
+        if (!isMounted) return;
+
+        if (authEventResolved) {
+          console.info("[AuthGuard] Resultado de getSession() ignorado porque um evento de autenticação já resolveu o estado.");
+          return;
+        }
+
+        if (error) {
+          console.warn("[AuthGuard] Bootstrap concluiu com fallback.", {
+            timedOut,
+            message: error.message,
+          });
+        }
+
+        updateStatus(
+          session ? "authenticated" : "unauthenticated",
+          timedOut ? "fallback por timeout" : "resultado de getSession()",
+        );
+      } catch (error) {
+        console.error("[AuthGuard] Falha inesperada no bootstrap.", error);
+        updateStatus("unauthenticated", "fallback por exceção");
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   if (status === "checking") return <LoadingScreen />;
