@@ -203,7 +203,6 @@ function App() {
     const currentSha = import.meta.env.VITE_COMMIT_SHA;
     const dismissed = sessionStorage.getItem("dismissed_sha");
 
-    if (dismissed === currentSha) return;
     if (typeof window === "undefined" || !("serviceWorker" in navigator)) {
       if (import.meta.env.DEV) {
         console.info("[update-check] Service Worker indisponível; verificação ignorada.");
@@ -224,6 +223,10 @@ function App() {
 
         const data = await response.json() as Partial<UpdateInfo>;
         if (cancelled || !data?.sha || !data?.message || !data?.createdAt) return;
+
+        if (dismissed === data.sha) {
+          return;
+        }
 
         if (currentSha && data.sha === currentSha) {
           return;
@@ -247,11 +250,17 @@ function App() {
   }, []);
 
   const handleDismiss = () => {
-    sessionStorage.setItem("dismissed_sha", import.meta.env.VITE_COMMIT_SHA);
+    if (updateInfo?.sha) {
+      sessionStorage.setItem("dismissed_sha", updateInfo.sha);
+    }
     setUpdateInfo(null);
   };
 
   const handleUpdate = async () => {
+    if (updateInfo?.sha) {
+      sessionStorage.setItem("dismissed_sha", updateInfo.sha);
+    }
+
     const reg = await navigator.serviceWorker.getRegistration();
     if (reg?.waiting) {
       reg.waiting.postMessage({ type: "SKIP_WAITING" });
