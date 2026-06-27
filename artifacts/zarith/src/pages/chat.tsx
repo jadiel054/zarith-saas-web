@@ -294,7 +294,47 @@ export default function ChatPage() {
       if (!reader) throw new Error("Sem stream disponível");
 
       const decoder = new TextDecoder();
-      let messageIndex = -1;
+
+      const syncAssistantMessage = () => {
+        setMessages((prev) => {
+          const updated = [...prev];
+          const lastMsg = updated[updated.length - 1];
+
+          if (lastMsg?.id === assistantMessage.id) {
+            updated[updated.length - 1] = { ...assistantMessage };
+          } else {
+            updated.push({ ...assistantMessage });
+          }
+
+          return updated;
+        });
+      };
+
+      const applyStreamEvent = (data: any) => {
+        if (data.type === "thinking") {
+          assistantMessage.thinking = (assistantMessage.thinking || "") + data.content;
+        } else if (data.type === "text") {
+          assistantMessage.content += data.content;
+        } else if (data.type === "tool_call") {
+          const nextToolCall = data.toolCall as ToolCall;
+          const toolCalls = assistantMessage.toolCalls || [];
+          const existingIndex = toolCalls.findIndex((call) => call.id === nextToolCall.id);
+
+          if (existingIndex >= 0) {
+            toolCalls[existingIndex] = nextToolCall;
+          } else {
+            toolCalls.push(nextToolCall);
+          }
+
+          assistantMessage.toolCalls = toolCalls;
+        } else if (data.type === "execution_log") {
+          assistantMessage.executionLogs?.push(data.log);
+        } else if (data.type === "plan_step") {
+          assistantMessage.planSteps?.push(data.step);
+        }
+
+        syncAssistantMessage();
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -309,29 +349,7 @@ export default function ChatPage() {
 
           try {
             const data = JSON.parse(line);
-
-            if (data.type === "thinking") {
-              assistantMessage.thinking = (assistantMessage.thinking || "") + data.content;
-            } else if (data.type === "text") {
-              assistantMessage.content += data.content;
-            } else if (data.type === "tool_call") {
-              assistantMessage.toolCalls?.push(data.toolCall);
-            } else if (data.type === "execution_log") {
-              assistantMessage.executionLogs?.push(data.log);
-            } else if (data.type === "plan_step") {
-              assistantMessage.planSteps?.push(data.step);
-            }
-
-            messageIndex = messages.length;
-            setMessages((prev) => {
-              const updated = [...prev];
-              if (messageIndex === prev.length) {
-                updated.push(assistantMessage);
-              } else {
-                updated[messageIndex] = { ...assistantMessage };
-              }
-              return updated;
-            });
+            applyStreamEvent(data);
           } catch (e) {
             console.error("Erro ao parsear linha:", e);
           }
@@ -341,9 +359,7 @@ export default function ChatPage() {
       if (buffer.trim()) {
         try {
           const data = JSON.parse(buffer);
-          if (data.type === "text") {
-            assistantMessage.content += data.content;
-          }
+          applyStreamEvent(data);
         } catch (e) {
           console.error("Erro ao parsear buffer final:", e);
         }
