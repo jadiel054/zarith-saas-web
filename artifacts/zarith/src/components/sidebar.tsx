@@ -307,6 +307,16 @@ function SidebarContent({
 
       {/* Footer */}
       <div className="p-2.5 border-t border-[var(--border-glow)] space-y-1 shrink-0 pb-[calc(0.5rem+env(safe-area-inset-bottom))] md:pb-2.5">
+        {!isCollapsed && (
+          <div className="px-2 pb-1">
+            <span className="text-xs text-muted-foreground opacity-50">
+              {import.meta.env.VITE_COMMIT_SHA
+                ? `build · ${import.meta.env.VITE_COMMIT_SHA.slice(0, 7)}`
+                : "build · dev"}
+            </span>
+          </div>
+        )}
+
         {/* About */}
         <button
           onClick={onAbout}

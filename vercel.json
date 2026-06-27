@@ -6,7 +6,8 @@
   "framework": null,
   "env": {
     "BASE_PATH": "/",
-    "NODE_ENV": "production"
+    "NODE_ENV": "production",
+    "VITE_COMMIT_SHA": "$VERCEL_GIT_COMMIT_SHA"
   },
   "rewrites": [
     {

@@ -8,6 +8,7 @@ import visionRouter from "./vision";
 import webRouter from "./web";
 import filesRouter from "./files";
 import chatRouter from "./chat";
+import versionRouter from "./version";
 
 const router: IRouter = Router();
 
@@ -20,5 +21,6 @@ router.use("/vision", visionRouter);
 router.use("/web", webRouter);
 router.use("/files", filesRouter);
 router.use("/chat", chatRouter);
+router.use("/version", versionRouter);
 
 export default router;

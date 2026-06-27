@@ -11,6 +11,7 @@ import MemoriesPage from "@/pages/memories";
 import AdminPage from "@/pages/admin";
 import AuthCallbackPage from "@/pages/auth-callback";
 import { getSessionWithTimeout, supabaseClient } from "@/lib/supabase";
+import { UpdateBanner } from "@/components/update-banner";
 import { useState, useEffect } from "react";
 
 const queryClient = new QueryClient({
@@ -189,11 +190,94 @@ function Router() {
   );
 }
 
+type UpdateInfo = {
+  sha: string;
+  message: string;
+  createdAt: string;
+};
+
 function App() {
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+
+  useEffect(() => {
+    const currentSha = import.meta.env.VITE_COMMIT_SHA;
+    const dismissed = sessionStorage.getItem("dismissed_sha");
+
+    if (dismissed === currentSha) return;
+    if (typeof window === "undefined" || !("serviceWorker" in navigator)) {
+      if (import.meta.env.DEV) {
+        console.info("[update-check] Service Worker indisponível; verificação ignorada.");
+      }
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        await navigator.serviceWorker.ready;
+
+        const response = await fetch("/api/version/latest");
+        if (!response.ok) {
+          throw new Error(`Version check retornou HTTP ${response.status}`);
+        }
+
+        const data = await response.json() as Partial<UpdateInfo>;
+        if (cancelled || !data?.sha || !data?.message || !data?.createdAt) return;
+
+        if (currentSha && data.sha === currentSha) {
+          return;
+        }
+
+        setUpdateInfo({
+          sha: data.sha,
+          message: data.message,
+          createdAt: data.createdAt,
+        });
+      } catch (error) {
+        if (import.meta.env.DEV) {
+          console.info("[update-check] Falha silenciosa ao verificar atualização.", error);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleDismiss = () => {
+    sessionStorage.setItem("dismissed_sha", import.meta.env.VITE_COMMIT_SHA);
+    setUpdateInfo(null);
+  };
+
+  const handleUpdate = async () => {
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (reg?.waiting) {
+      reg.waiting.postMessage({ type: "SKIP_WAITING" });
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        window.location.reload();
+      }, { once: true });
+    } else if (reg) {
+      await reg.update();
+      window.location.reload();
+    } else {
+      window.location.reload();
+    }
+  };
+
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+          {updateInfo ? (
+            <UpdateBanner
+              commitMessage={updateInfo.message}
+              buildDate={updateInfo.createdAt}
+              onUpdate={handleUpdate}
+              onDismiss={handleDismiss}
+            />
+          ) : null}
           <Router />
           {/* CommandPalette em ErrorBoundary isolado para não crashar o app inteiro */}
           <ErrorBoundary fallback={null}>
