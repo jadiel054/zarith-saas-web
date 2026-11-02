@@ -3,6 +3,41 @@ import path from "node:path";
 
 export type JsonRecord = Record<string, any>;
 
+export function sendSuccess<T>(res: Response, data: T, statusCode: number = 200) {
+  return res.status(statusCode).json({
+    success: true,
+    data,
+  });
+}
+
+export function getUserIdFromRequest(req: Request): string | undefined {
+  // Obter do header Authorization (Bearer token do Supabase)
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const token = authHeader.split(" ")[1];
+    try {
+      // Decodificar JWT para obter user_id
+      const base64Payload = token.split(".")[1];
+      const payload = JSON.parse(Buffer.from(base64Payload, "base64").toString("utf8"));
+      return payload.sub || payload.user_id || payload.id;
+    } catch {
+      // Ignorar erro
+    }
+  }
+  
+  // Obter do body (para requisições POST)
+  if (req.body && typeof req.body === "object") {
+    return req.body.userId || req.body.user_id;
+  }
+  
+  // Obter do query params
+  if (req.query && typeof req.query === "object") {
+    return String(req.query.userId || req.query.user_id || "");
+  }
+  
+  return undefined;
+}
+
 export function getBody(req: Request): JsonRecord {
   return (req.body && typeof req.body === "object") ? req.body : {};
 }
