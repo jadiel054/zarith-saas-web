@@ -10,15 +10,13 @@ import {
   Lock,
   Loader2,
   KeyRound,
-  UserPlus,
-  LogIn,
   Eye,
   EyeOff,
   CheckCircle2,
 } from "lucide-react";
-import { supabaseClient } from "@/lib/supabase";
+import { useNavigate, Link } from "wouter";
 
-// Ícones OAuth
+// Ícones
 const GithubIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
     <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z" />
@@ -34,29 +32,10 @@ const GoogleIcon = () => (
   </svg>
 );
 
-// Traduz erros do Supabase para português claro
-function translateError(message: string): string {
-  const m = message.toLowerCase();
-  if (m.includes("invalid login credentials") || m.includes("invalid_credentials"))
-    return "Email ou senha incorretos. Verifique os dados e tente novamente.";
-  if (m.includes("email not confirmed"))
-    return "Seu email ainda não foi confirmado. Verifique sua caixa de entrada e clique no link de confirmação.";
-  if (m.includes("user already registered") || m.includes("already registered"))
-    return "Este email já possui uma conta. Tente fazer login.";
-  if (m.includes("password should be at least"))
-    return "A senha deve ter pelo menos 6 caracteres.";
-  if (m.includes("unable to validate email address"))
-    return "Endereço de email inválido.";
-  if (m.includes("email rate limit exceeded") || m.includes("rate limit"))
-    return "Muitas tentativas. Aguarde alguns minutos e tente novamente.";
-  if (m.includes("signup is disabled"))
-    return "Cadastros estão desativados no momento. Entre em contato com o suporte.";
-  if (m.includes("network") || m.includes("fetch"))
-    return "Erro de conexão. Verifique sua internet e tente novamente.";
-  return message;
-}
+// API base URL
+const API_BASE = import.meta.env.BASE_URL || "/";
 
-type Step = "email" | "password" | "signup" | "check-email";
+type Step = "email" | "password" | "signup" | "check-email" | "forgot-password" | "reset-password";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -66,10 +45,33 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [glitch, setGlitch] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [mode, setMode] = useState<"login" | "signup">("login");
+  const [resetToken, setResetToken] = useState("");
+  const navigate = useNavigate();
 
-  const noSupabase = !supabaseClient;
+  // Verificar se já está logado ao montar a página
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  const checkAuth = async () => {
+    try {
+      const response = await fetch(`${API_BASE}api/auth/me`, {
+        credentials: "include",
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data?.user) {
+          navigate("/chat");
+        }
+      }
+    } catch (error) {
+      console.error("Erro ao verificar autenticação:", error);
+    }
+  };
 
   useEffect(() => {
     const triggerGlitch = () => {
@@ -82,170 +84,212 @@ export default function LoginPage() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Verifica se já está logado ao montar a página
-  useEffect(() => {
-    if (!supabaseClient) return;
-    supabaseClient.auth.getSession().then(({ data: { session } }) => {
-      if (session) window.location.href = "/chat";
-    });
-  }, []);
-
-  const redirectUrl = `${window.location.origin}/api/auth/callback`;
-
-  // ── OAuth ──────────────────────────────────────────────────────────────────
-
-  const handleGitHubLogin = async () => {
-    setErrorMsg(null);
-    if (!supabaseClient) {
-      setErrorMsg("Supabase não configurado. Adicione VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY nas variáveis de ambiente do Vercel.");
-      return;
-    }
-    setLoading(true);
-    try {
-      const { error } = await supabaseClient.auth.signInWithOAuth({
-        provider: "github",
-        options: {
-          redirectTo: redirectUrl,
-          skipBrowserRedirect: false,
-        },
-      });
-      if (error) throw error;
-      // Se chegou aqui sem redirect, algo deu errado
-    } catch (err) {
-      setErrorMsg(translateError((err as Error).message));
-      setLoading(false);
-    }
-  };
-
-  const handleGoogleLogin = async () => {
-    setErrorMsg(null);
-    if (!supabaseClient) {
-      setErrorMsg("Supabase não configurado. Adicione VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY nas variáveis de ambiente do Vercel.");
-      return;
-    }
-    setLoading(true);
-    try {
-      const { error } = await supabaseClient.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: redirectUrl,
-          skipBrowserRedirect: false,
-        },
-      });
-      if (error) throw error;
-    } catch (err) {
-      setErrorMsg(translateError((err as Error).message));
-      setLoading(false);
-    }
-  };
-
-  // ── Email: avançar para senha ──────────────────────────────────────────────
-
-  const handleEmailSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg(null);
-    if (!email.trim()) { setErrorMsg("Digite seu email."); return; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setErrorMsg("Email inválido."); return; }
-
-    if (noSupabase) {
-      // Modo sem Supabase: permite acesso livre para desenvolvimento
-      window.location.href = "/chat";
-      return;
-    }
-
-    setStep(mode === "signup" ? "signup" : "password");
-  };
-
-  // ── Login com email + senha ────────────────────────────────────────────────
-
-  const handleSignIn = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg(null);
-    if (!password) { setErrorMsg("Digite sua senha."); return; }
-
-    if (noSupabase) {
-      window.location.href = "/chat";
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const { error } = await supabaseClient!.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-      window.location.href = "/chat";
-    } catch (err) {
-      setErrorMsg(translateError((err as Error).message));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ── Cadastro com email + senha ─────────────────────────────────────────────
-
-  const handleSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg(null);
-    if (!password) { setErrorMsg("Digite uma senha."); return; }
-    if (password.length < 6) { setErrorMsg("A senha deve ter pelo menos 6 caracteres."); return; }
-    if (password !== confirmPassword) { setErrorMsg("As senhas não coincidem."); return; }
-
-    if (noSupabase) {
-      window.location.href = "/chat";
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const { data, error } = await supabaseClient!.auth.signUp({
-        email,
-        password,
-        options: { emailRedirectTo: redirectUrl },
-      });
-
-      if (error) throw error;
-
-      // Se o usuário já existia, o Supabase retorna session null e identities vazio
-      if (data.user && data.user.identities?.length === 0) {
-        setErrorMsg("Este email já possui uma conta. Clique em 'Já tenho conta' e faça login.");
-        return;
-      }
-
-      // Conta criada — aguardando confirmação de email
-      setStep("check-email");
-    } catch (err) {
-      setErrorMsg(translateError((err as Error).message));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ── Esqueci a senha ────────────────────────────────────────────────────────
-
-  const handleForgotPassword = async () => {
-    setErrorMsg(null);
-    if (!email) { setErrorMsg("Volte e informe seu email antes."); return; }
-    if (!supabaseClient) return;
-    setLoading(true);
-    try {
-      const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
-        redirectTo: redirectUrl,
-      });
-      if (error) throw error;
-      setErrorMsg(`Link de redefinição enviado para ${email}. Verifique sua caixa de entrada.`);
-    } catch (err) {
-      setErrorMsg(translateError((err as Error).message));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ── Features ───────────────────────────────────────────────────────────────
+  // Features
   const features = [
     { icon: <Cpu size={16} />, text: "Múltiplos modelos de IA" },
     { icon: <Shield size={16} />, text: "Dados criptografados" },
     { icon: <Zap size={16} />, text: "Respostas em tempo real" },
     { icon: <Globe size={16} />, text: "Web search integrado" },
   ];
+
+  // Login com email + senha
+  const handleSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    if (!password) { setErrorMsg("Digite sua senha."); return; }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}api/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, password }),
+        credentials: "include",
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || "Falha ao fazer login");
+      }
+      
+      if (data.success) {
+        navigate("/chat");
+      }
+    } catch (err) {
+      setErrorMsg((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Cadastro com email + senha
+  const handleSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    if (!password) { setErrorMsg("Digite uma senha."); return; }
+    if (password.length < 8) { setErrorMsg("A senha deve ter pelo menos 8 caracteres."); return; }
+    if (password !== confirmPassword) { setErrorMsg("As senhas não coincidem."); return; }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}api/auth/register`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, password, name: email.split("@")[0] }),
+        credentials: "include",
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || "Falha ao criar conta");
+      }
+      
+      if (data.success) {
+        setStep("check-email");
+      }
+    } catch (err) {
+      setErrorMsg((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Solicitar recuperação de senha
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    if (!email) { setErrorMsg("Digite seu email."); return; }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}api/auth/forgot-password`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email }),
+        credentials: "include",
+      });
+
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        setSuccessMsg(`Link de redefinição enviado para ${email}. Verifique sua caixa de entrada.`);
+        setStep("email");
+      } else {
+        throw new Error(data.error || "Falha ao solicitar recuperação");
+      }
+    } catch (err) {
+      setErrorMsg((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Resetar senha
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    if (!password) { setErrorMsg("Digite uma nova senha."); return; }
+    if (password.length < 8) { setErrorMsg("A senha deve ter pelo menos 8 caracteres."); return; }
+    if (password !== confirmPassword) { setErrorMsg("As senhas não coincidem."); return; }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}api/auth/reset-password`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ token: resetToken, newPassword: password }),
+        credentials: "include",
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || "Falha ao resetar senha");
+      }
+      
+      if (data.success) {
+        setSuccessMsg("Senha redefinida com sucesso! Faça login.");
+        setStep("email");
+        setPassword("");
+        setConfirmPassword("");
+        setResetToken("");
+      }
+    } catch (err) {
+      setErrorMsg((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Verificar token de reset ao montar (se houver na URL)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get("token");
+    const action = urlParams.get("action");
+    
+    if (token && action === "reset-password") {
+      setResetToken(token);
+      setStep("reset-password");
+      // Remover token da URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
+  // Verificar token de verificação ao montar
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get("token");
+    const action = urlParams.get("action");
+    
+    if (token && action === "verify-email") {
+      verifyEmailToken(token);
+    }
+  }, []);
+
+  const verifyEmailToken = async (token: string) => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}api/auth/verify-email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ token }),
+        credentials: "include",
+      });
+
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        setSuccessMsg("Email verificado com sucesso! Faça login.");
+        setStep("email");
+      } else {
+        setErrorMsg(data.error || "Falha ao verificar email");
+        setStep("email");
+      }
+    } catch (err) {
+      setErrorMsg((err as Error).message);
+      setStep("email");
+    } finally {
+      setLoading(false);
+      // Remover token da URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] relative overflow-hidden flex flex-col items-center justify-center p-6">
@@ -289,17 +333,8 @@ export default function LoginPage() {
           animate={{ opacity: 1, scale: 1 }}
           transition={{ delay: 0.2 }}
         >
-          {/* Aviso de sem Supabase */}
-          {noSupabase && (
-            <div className="px-4 py-3 bg-[var(--accent-pink)]/10 border border-[var(--accent-pink)]/30 rounded-xl text-xs text-[var(--accent-pink)] text-left">
-              ⚠️ Variáveis VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY não configuradas.
-              Login externo desabilitado — modo de desenvolvimento ativo.
-            </div>
-          )}
-
           <AnimatePresence mode="wait">
-
-            {/* ── STEP: EMAIL ─────────────────────────────────────── */}
+            {/* STEP: EMAIL */}
             {step === "email" && (
               <motion.div
                 key="email"
@@ -313,38 +348,12 @@ export default function LoginPage() {
                     {mode === "login" ? "Acessar conta" : "Criar conta"}
                   </h2>
                   <p className="text-xs text-[var(--text-secondary)] mt-1">
-                    {mode === "login" ? "Entre com email ou provedor OAuth" : "Crie sua conta para começar"}
+                    {mode === "login" ? "Entre com email e senha" : "Crie sua conta para começar"}
                   </p>
                 </div>
 
-                {/* OAuth */}
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={handleGitHubLogin}
-                    disabled={loading}
-                    className="flex items-center justify-center gap-2 px-4 py-3 bg-[var(--bg-secondary)] border border-[var(--border-glow)] rounded-xl font-bold text-sm hover:border-[var(--accent-cyan)] hover:text-[var(--accent-cyan)] transition-all disabled:opacity-50"
-                  >
-                    {loading ? <Loader2 size={16} className="animate-spin" /> : <GithubIcon />}
-                    GitHub
-                  </button>
-                  <button
-                    onClick={handleGoogleLogin}
-                    disabled={loading}
-                    className="flex items-center justify-center gap-2 px-4 py-3 bg-[var(--bg-secondary)] border border-[var(--border-glow)] rounded-xl font-bold text-sm hover:border-[var(--accent-cyan)] transition-all disabled:opacity-50"
-                  >
-                    {loading ? <Loader2 size={16} className="animate-spin" /> : <GoogleIcon />}
-                    Google
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-3 text-[var(--text-secondary)]">
-                  <div className="flex-1 h-px bg-[var(--border-glow)]" />
-                  <span className="text-xs font-bold uppercase tracking-widest">ou</span>
-                  <div className="flex-1 h-px bg-[var(--border-glow)]" />
-                </div>
-
                 {/* Email form */}
-                <form onSubmit={handleEmailSubmit} className="space-y-3">
+                <form onSubmit={(e) => { e.preventDefault(); mode === "login" ? setStep("password") : setStep("signup"); }} className="space-y-3">
                   <div className="relative">
                     <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" size={18} />
                     <input
@@ -390,10 +399,19 @@ export default function LoginPage() {
                     </>
                   )}
                 </div>
+
+                <div className="text-center">
+                  <button
+                    onClick={() => setStep("forgot-password")}
+                    className="text-xs text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] transition-colors"
+                  >
+                    Esqueci minha senha
+                  </button>
+                </div>
               </motion.div>
             )}
 
-            {/* ── STEP: PASSWORD (LOGIN) ───────────────────────────── */}
+            {/* STEP: PASSWORD (LOGIN) */}
             {step === "password" && (
               <motion.div
                 key="password"
@@ -410,7 +428,7 @@ export default function LoginPage() {
                     ← Voltar
                   </button>
                   <div className="flex items-center gap-3">
-                    <LogIn size={20} className="text-[var(--accent-cyan)]" />
+                    <KeyRound size={20} className="text-[var(--accent-cyan)]" />
                     <h2 className="font-orbitron font-bold text-xl">Entrar</h2>
                   </div>
                   <p className="text-xs text-[var(--text-secondary)] mt-1 font-mono">{email}</p>
@@ -446,20 +464,10 @@ export default function LoginPage() {
                     {loading ? "Entrando..." : "Entrar"}
                   </button>
                 </form>
-
-                <div className="text-center">
-                  <button
-                    onClick={handleForgotPassword}
-                    disabled={loading}
-                    className="text-xs text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] transition-colors"
-                  >
-                    Esqueci minha senha
-                  </button>
-                </div>
               </motion.div>
             )}
 
-            {/* ── STEP: SIGNUP ─────────────────────────────────────── */}
+            {/* STEP: SIGNUP */}
             {step === "signup" && (
               <motion.div
                 key="signup"
@@ -476,7 +484,7 @@ export default function LoginPage() {
                     ← Voltar
                   </button>
                   <div className="flex items-center gap-3">
-                    <UserPlus size={20} className="text-[var(--accent-purple)]" />
+                    <KeyRound size={20} className="text-[var(--accent-purple)]" />
                     <h2 className="font-orbitron font-bold text-xl">Criar conta</h2>
                   </div>
                   <p className="text-xs text-[var(--text-secondary)] mt-1 font-mono">{email}</p>
@@ -489,7 +497,7 @@ export default function LoginPage() {
                       type={showPassword ? "text" : "password"}
                       value={password}
                       onChange={(e) => { setPassword(e.target.value); setErrorMsg(null); }}
-                      placeholder="Crie uma senha (mín. 6 caracteres)"
+                      placeholder="Crie uma senha (mín. 8 caracteres)"
                       autoComplete="new-password"
                       autoFocus
                       className="w-full bg-[var(--bg-primary)] border border-[var(--border-glow)] rounded-xl pl-11 pr-12 py-3 text-sm focus:border-[var(--accent-cyan)] outline-none transition-all font-mono"
@@ -522,10 +530,10 @@ export default function LoginPage() {
                         <div
                           key={i}
                           className={`flex-1 rounded-full transition-colors ${
-                            i < (password.length < 6 ? 1 : password.length < 8 ? 2 : password.length < 12 ? 3 : 4)
-                              ? password.length < 6
+                            i < (password.length < 8 ? 1 : password.length < 10 ? 2 : password.length < 12 ? 3 : 4)
+                              ? password.length < 8
                                 ? "bg-[var(--accent-pink)]"
-                                : password.length < 8
+                                : password.length < 10
                                 ? "bg-yellow-500"
                                 : "bg-[var(--accent-green)]"
                               : "bg-[var(--border-glow)]"
@@ -540,14 +548,14 @@ export default function LoginPage() {
                     disabled={loading || !password || !confirmPassword}
                     className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-[var(--accent-purple)] to-[var(--accent-cyan)] text-[var(--bg-primary)] font-bold rounded-xl hover:brightness-110 transition-all disabled:opacity-50"
                   >
-                    {loading ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />}
+                    {loading ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />}
                     {loading ? "Criando conta..." : "Criar conta"}
                   </button>
                 </form>
               </motion.div>
             )}
 
-            {/* ── STEP: CHECK EMAIL ────────────────────────────────── */}
+            {/* STEP: CHECK EMAIL */}
             {step === "check-email" && (
               <motion.div
                 key="check-email"
@@ -581,22 +589,148 @@ export default function LoginPage() {
               </motion.div>
             )}
 
+            {/* STEP: FORGOT PASSWORD */}
+            {step === "forgot-password" && (
+              <motion.div
+                key="forgot-password"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-5"
+              >
+                <div>
+                  <button
+                    onClick={() => { setStep("email"); setErrorMsg(null); }}
+                    className="text-xs text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] transition-colors mb-3 flex items-center gap-1"
+                  >
+                    ← Voltar
+                  </button>
+                  <div className="flex items-center gap-3">
+                    <Lock size={20} className="text-[var(--accent-purple)]" />
+                    <h2 className="font-orbitron font-bold text-xl">Recuperar senha</h2>
+                  </div>
+                  <p className="text-xs text-[var(--text-secondary)] mt-1">
+                    Informe seu email para receber um link de redefinição
+                  </p>
+                </div>
+
+                <form onSubmit={handleForgotPassword} className="space-y-3">
+                  <div className="relative">
+                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" size={18} />
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => { setEmail(e.target.value); setErrorMsg(null); }}
+                      placeholder="seu@email.com"
+                      autoComplete="email"
+                      autoFocus
+                      className="w-full bg-[var(--bg-primary)] border border-[var(--border-glow)] rounded-xl pl-11 pr-4 py-3 text-sm focus:border-[var(--accent-cyan)] outline-none transition-all font-mono"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading || !email}
+                    className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-[var(--accent-purple)] to-[var(--accent-cyan)] text-[var(--bg-primary)] font-bold rounded-xl hover:brightness-110 transition-all disabled:opacity-50"
+                  >
+                    {loading ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />}
+                    {loading ? "Enviando..." : "Enviar link de recuperação"}
+                  </button>
+                </form>
+              </motion.div>
+            )}
+
+            {/* STEP: RESET PASSWORD */}
+            {step === "reset-password" && (
+              <motion.div
+                key="reset-password"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-5"
+              >
+                <div>
+                  <button
+                    onClick={() => { setStep("email"); setPassword(""); setConfirmPassword(""); setErrorMsg(null); }}
+                    className="text-xs text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] transition-colors mb-3 flex items-center gap-1"
+                  >
+                    ← Voltar
+                  </button>
+                  <div className="flex items-center gap-3">
+                    <KeyRound size={20} className="text-[var(--accent-cyan)]" />
+                    <h2 className="font-orbitron font-bold text-xl">Redefinir senha</h2>
+                  </div>
+                  <p className="text-xs text-[var(--text-secondary)] mt-1">
+                    Crie uma nova senha
+                  </p>
+                </div>
+
+                <form onSubmit={handleResetPassword} className="space-y-3">
+                  <div className="relative">
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" size={18} />
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => { setPassword(e.target.value); setErrorMsg(null); }}
+                      placeholder="Nova senha (mín. 8 caracteres)"
+                      autoComplete="new-password"
+                      autoFocus
+                      className="w-full bg-[var(--bg-primary)] border border-[var(--border-glow)] rounded-xl pl-11 pr-12 py-3 text-sm focus:border-[var(--accent-cyan)] outline-none transition-all font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] transition-colors"
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+
+                  <div className="relative">
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" size={18} />
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={confirmPassword}
+                      onChange={(e) => { setConfirmPassword(e.target.value); setErrorMsg(null); }}
+                      placeholder="Confirme a nova senha"
+                      autoComplete="new-password"
+                      className="w-full bg-[var(--bg-primary)] border border-[var(--border-glow)] rounded-xl pl-11 pr-4 py-3 text-sm focus:border-[var(--accent-cyan)] outline-none transition-all font-mono"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading || !password || !confirmPassword}
+                    className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-purple)] text-[var(--bg-primary)] font-bold rounded-xl hover:brightness-110 transition-all disabled:opacity-50"
+                  >
+                    {loading ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                    {loading ? "Redefinindo..." : "Redefinir senha"}
+                  </button>
+                </form>
+              </motion.div>
+            )}
           </AnimatePresence>
 
-          {/* Mensagem de erro */}
+          {/* Mensagens de erro e sucesso */}
           <AnimatePresence>
-            {errorMsg && step !== "check-email" && (
+            {errorMsg && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
-                className={`px-4 py-3 rounded-xl text-sm border text-left ${
-                  errorMsg.includes("enviado") || errorMsg.includes("sucesso")
-                    ? "bg-[var(--accent-green)]/10 border-[var(--accent-green)]/30 text-[var(--accent-green)]"
-                    : "bg-[var(--accent-pink)]/10 border-[var(--accent-pink)]/30 text-[var(--accent-pink)]"
-                }`}
+                className="px-4 py-3 rounded-xl text-sm border text-left bg-[var(--accent-pink)]/10 border-[var(--accent-pink)]/30 text-[var(--accent-pink)]"
               >
                 {errorMsg}
+              </motion.div>
+            )}
+            {successMsg && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="px-4 py-3 rounded-xl text-sm border text-left bg-[var(--accent-green)]/10 border-[var(--accent-green)]/30 text-[var(--accent-green)]"
+              >
+                {successMsg}
               </motion.div>
             )}
           </AnimatePresence>

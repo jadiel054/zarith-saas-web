@@ -11,21 +11,12 @@ export function sendSuccess<T>(res: Response, data: T, statusCode: number = 200)
 }
 
 export function getUserIdFromRequest(req: Request): string | undefined {
-  // Obter do header Authorization (Bearer token do Supabase)
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    const token = authHeader.split(" ")[1];
-    try {
-      // Decodificar JWT para obter user_id
-      const base64Payload = token.split(".")[1];
-      const payload = JSON.parse(Buffer.from(base64Payload, "base64").toString("utf8"));
-      return payload.sub || payload.user_id || payload.id;
-    } catch {
-      // Ignorar erro
-    }
+  // Obter do request autenticado (middleware de auth)
+  if (req.user && typeof req.user === "object" && req.user.id) {
+    return req.user.id;
   }
   
-  // Obter do body (para requisições POST)
+  // Obter do body (para requisições POST - fallback para compatibilidade)
   if (req.body && typeof req.body === "object") {
     return req.body.userId || req.body.user_id;
   }
@@ -100,22 +91,7 @@ export function vercelHeaders(token: string) {
   return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 }
 
-export function supabaseCreds(req: Request) {
-  const body = getBody(req);
-  const url = (body.url || body.supabaseUrl || body.SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
-  const key = (body.key || body.serviceRoleKey || body.service_role_key || body.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
-  if (!url) throw Object.assign(new Error("SUPABASE_URL não configurada. Envie { url: \"https://xxxx.supabase.co\" } ou configure a variável de ambiente."), { statusCode: 401 });
-  if (!key) throw Object.assign(new Error("SUPABASE_SERVICE_ROLE_KEY não configurada. Envie { serviceRoleKey: \"eyJ...\" } ou configure a variável de ambiente."), { statusCode: 401 });
-  return { url: url.replace(/\/$/, ""), key };
-}
 
-export function supabaseHeaders(key: string) {
-  return {
-    apikey: key,
-    Authorization: `Bearer ${key}`,
-    "Content-Type": "application/json",
-  };
-}
 
 export function encodeBase64(content: string) {
   return Buffer.from(content, "utf8").toString("base64");

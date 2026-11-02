@@ -3,6 +3,8 @@
 
 // Exporta todas as tabelas
 export * from "./users";
+export * from "./sessions";
+export * from "./password_reset_tokens";
 export * from "./conversations";
 export * from "./messages";
 export * from "./templates";

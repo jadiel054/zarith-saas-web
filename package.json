@@ -11,5 +11,11 @@
   "devDependencies": {
     "prettier": "^3.8.3",
     "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "@node-rs/bcrypt": "^2.0.0",
+    "argon2": "^0.45.1",
+    "cookie-parser": "^1.4.7",
+    "jsonwebtoken": "^9.0.3"
   }
 }
