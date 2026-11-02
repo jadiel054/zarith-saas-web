@@ -10,7 +10,7 @@ import SettingsPage from "@/pages/settings";
 import MemoriesPage from "@/pages/memories";
 import AdminPage from "@/pages/admin";
 import AuthCallbackPage from "@/pages/auth-callback";
-import { getSessionWithTimeout, supabaseClient } from "@/lib/supabase";
+import { isAuthenticated } from "@/lib/auth-session";
 import { UpdateBanner } from "@/components/update-banner";
 import { useState, useEffect } from "react";
 
@@ -23,8 +23,6 @@ const queryClient = new QueryClient({
   },
 });
 
-// ErrorBoundary para capturar crashes de componentes filhos (ex: cmdk, framer-motion)
-// e exibir tela de erro amigável em vez de tela preta
 class ErrorBoundary extends Component<
   { children: ReactNode; fallback?: ReactNode },
   { hasError: boolean; error: Error | null }
@@ -72,7 +70,6 @@ class ErrorBoundary extends Component<
   }
 }
 
-// Componente de carregamento enquanto verifica autenticação
 function LoadingScreen() {
   return (
     <div className="min-h-screen bg-[#020208] flex items-center justify-center">
@@ -81,76 +78,14 @@ function LoadingScreen() {
   );
 }
 
-// Guard que protege rotas autenticadas.
-// Se supabaseClient não estiver configurado (vars ausentes), permite acesso
-// livre para não bloquear o desenvolvimento local.
+// Guard: exige JWT nativo (zarith-auth-token) salvo no login com Neon.
 function AuthGuard({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<"checking" | "authenticated" | "unauthenticated">("checking");
 
   useEffect(() => {
-    let isMounted = true;
-    let authEventResolved = false;
-
-    const updateStatus = (
-      nextStatus: "authenticated" | "unauthenticated",
-      reason: string,
-    ) => {
-      if (!isMounted) return;
-
-      console.info("[AuthGuard] Atualizando status.", { nextStatus, reason });
-      setStatus((currentStatus) => (currentStatus === nextStatus ? currentStatus : nextStatus));
-    };
-
-    if (!supabaseClient) {
-      console.info("[AuthGuard] Supabase ausente; liberando acesso local.");
-      updateStatus("authenticated", "supabase ausente");
-      return;
-    }
-
-    console.info("[AuthGuard] Iniciando bootstrap de autenticação.");
-
-    // Ouve mudanças de estado de autenticação (logout em outras abas, expiração de token)
-    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((event, session) => {
-      authEventResolved = true;
-      console.info("[AuthGuard] Evento de autenticação recebido.", {
-        event,
-        hasSession: Boolean(session),
-      });
-      updateStatus(session ? "authenticated" : "unauthenticated", `evento ${event}`);
-    });
-
-    void (async () => {
-      try {
-        const { session, error, timedOut } = await getSessionWithTimeout();
-
-        if (!isMounted) return;
-
-        if (authEventResolved) {
-          console.info("[AuthGuard] Resultado de getSession() ignorado porque um evento de autenticação já resolveu o estado.");
-          return;
-        }
-
-        if (error) {
-          console.warn("[AuthGuard] Bootstrap concluiu com fallback.", {
-            timedOut,
-            message: error.message,
-          });
-        }
-
-        updateStatus(
-          session ? "authenticated" : "unauthenticated",
-          timedOut ? "fallback por timeout" : "resultado de getSession()",
-        );
-      } catch (error) {
-        console.error("[AuthGuard] Falha inesperada no bootstrap.", error);
-        updateStatus("unauthenticated", "fallback por exceção");
-      }
-    })();
-
-    return () => {
-      isMounted = false;
-      subscription.unsubscribe();
-    };
+    const ok = isAuthenticated();
+    console.info("[AuthGuard] Bootstrap sessão Zarith.", { authenticated: ok });
+    setStatus(ok ? "authenticated" : "unauthenticated");
   }, []);
 
   if (status === "checking") return <LoadingScreen />;
@@ -161,30 +96,33 @@ function AuthGuard({ children }: { children: ReactNode }) {
 function Router() {
   return (
     <Switch>
-      {/* Rota pública — login */}
       <Route path="/" component={LoginPage} />
-
-      {/* Callback de OAuth — público (precisa trocar o code) */}
       <Route path="/api/auth/callback" component={AuthCallbackPage} />
-
-      {/* Rotas protegidas — requerem autenticação */}
       <Route path="/chat">
-        <AuthGuard><ChatPage /></AuthGuard>
+        <AuthGuard>
+          <ChatPage />
+        </AuthGuard>
       </Route>
       <Route path="/dashboard">
-        <AuthGuard><DashboardPage /></AuthGuard>
+        <AuthGuard>
+          <DashboardPage />
+        </AuthGuard>
       </Route>
       <Route path="/settings">
-        <AuthGuard><SettingsPage /></AuthGuard>
+        <AuthGuard>
+          <SettingsPage />
+        </AuthGuard>
       </Route>
       <Route path="/memories">
-        <AuthGuard><MemoriesPage /></AuthGuard>
+        <AuthGuard>
+          <MemoriesPage />
+        </AuthGuard>
       </Route>
       <Route path="/admin">
-        <AuthGuard><AdminPage /></AuthGuard>
+        <AuthGuard>
+          <AdminPage />
+        </AuthGuard>
       </Route>
-
-      {/* 404 */}
       <Route component={NotFound} />
     </Switch>
   );
@@ -221,7 +159,7 @@ function App() {
           throw new Error(`Version check retornou HTTP ${response.status}`);
         }
 
-        const data = await response.json() as Partial<UpdateInfo>;
+        const data = (await response.json()) as Partial<UpdateInfo>;
         if (cancelled || !data?.sha || !data?.message || !data?.createdAt) return;
 
         if (dismissed === data.sha) {
@@ -264,9 +202,13 @@ function App() {
     const reg = await navigator.serviceWorker.getRegistration();
     if (reg?.waiting) {
       reg.waiting.postMessage({ type: "SKIP_WAITING" });
-      navigator.serviceWorker.addEventListener("controllerchange", () => {
-        window.location.reload();
-      }, { once: true });
+      navigator.serviceWorker.addEventListener(
+        "controllerchange",
+        () => {
+          window.location.reload();
+        },
+        { once: true }
+      );
     } else if (reg) {
       await reg.update();
       window.location.reload();
@@ -288,7 +230,6 @@ function App() {
             />
           ) : null}
           <Router />
-          {/* CommandPalette em ErrorBoundary isolado para não crashar o app inteiro */}
           <ErrorBoundary fallback={null}>
             <CommandPalette />
           </ErrorBoundary>
