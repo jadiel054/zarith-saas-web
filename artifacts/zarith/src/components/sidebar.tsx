@@ -65,7 +65,7 @@ function loadPinnedSessionIds(): string[] {
   }
 }
 
-/** Conteúdo interno da sidebar — compartilhado entre desktop e mobile drawer */
+/** Conteudo interno da sidebar — compartilhado entre desktop e mobile drawer */
 function SidebarContent({
   user,
   isCollapsed,
@@ -110,7 +110,7 @@ function SidebarContent({
   const pinnedSessions = filteredSessions.filter((session) => pinnedSessionIds.includes(session.id));
   const regularSessions = filteredSessions.filter((session) => !pinnedSessionIds.includes(session.id));
 
-  const displayName = user?.name || "Usuário";
+  const displayName = user?.name || "Usuario";
   const displayEmail = user?.email || "";
 
   const togglePinned = (sessionId: string) => {
@@ -135,7 +135,7 @@ function SidebarContent({
         return;
       }
       await navigator.clipboard.writeText(url);
-      window.alert("Link da conversa copiado para a área de transferência.");
+      window.alert("Link da conversa copiado para a area de transferencia.");
     } catch {
       window.prompt("Copie o link da conversa", url);
     }
@@ -172,8 +172,8 @@ function SidebarContent({
                 <button
                   onClick={(event) => event.stopPropagation()}
                   className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1.5 rounded-lg hover:bg-white/10 text-[var(--text-secondary)] hover:text-[#00f5ff] transition-all shrink-0"
-                  title="Mais opções"
-                  aria-label={`Mais opções para ${session.title}`}
+                  title="Mais opcoes"
+                  aria-label={`Mais opcoes para ${session.title}`}
                 >
                   <MoreHorizontal size={15} />
                 </button>
@@ -213,7 +213,6 @@ function SidebarContent({
 
   return (
     <div className="h-full flex flex-col bg-[var(--bg-secondary)] overflow-hidden">
-      {/* Top bar */}
       <div className="px-4 py-3 flex items-center justify-between shrink-0 border-b border-[var(--border-glow)]">
         {!isCollapsed && (
           <span className="font-orbitron font-black text-lg bg-gradient-to-r from-[#00f5ff] to-[#bf00ff] bg-clip-text text-transparent whitespace-nowrap">
@@ -221,7 +220,6 @@ function SidebarContent({
           </span>
         )}
         <div className="flex items-center gap-1 ml-auto">
-          {/* Fechar drawer mobile */}
           {onClose && (
             <button
               onClick={onClose}
@@ -231,7 +229,6 @@ function SidebarContent({
               <X size={16} />
             </button>
           )}
-          {/* Colapsar desktop */}
           <button
             onClick={() => setIsCollapsed(!isCollapsed)}
             className="p-1.5 hover:bg-[var(--bg-card-hover)] rounded-lg text-[#00f5ff] transition-colors hidden md:flex"
@@ -242,7 +239,6 @@ function SidebarContent({
         </div>
       </div>
 
-      {/* New chat button */}
       <div className="px-3 py-2.5 shrink-0">
         <button
           onClick={onNewChat}
@@ -254,14 +250,13 @@ function SidebarContent({
         </button>
       </div>
 
-      {/* Search */}
       {!isCollapsed && (
         <div className="px-3 mb-2 shrink-0">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" size={14} />
             <input
               type="text"
-              placeholder="Buscar histórico..."
+              placeholder="Buscar historico..."
               className="w-full bg-[var(--bg-primary)] border border-[var(--border-glow)] rounded-lg py-1.5 pl-8 pr-3 text-xs focus:outline-none focus:border-[#00f5ff] transition-all"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -270,7 +265,6 @@ function SidebarContent({
         </div>
       )}
 
-      {/* Sessions list */}
       <div className="flex-1 overflow-y-auto px-2 space-y-3 min-h-0 pb-3">
         {pinnedSessions.length > 0 && !isCollapsed && (
           <div className="space-y-1">
@@ -305,7 +299,6 @@ function SidebarContent({
         )}
       </div>
 
-      {/* Footer */}
       <div className="p-2.5 border-t border-[var(--border-glow)] space-y-1 shrink-0 pb-[calc(0.5rem+env(safe-area-inset-bottom))] md:pb-2.5">
         {!isCollapsed && (
           <div className="px-2 pb-1">
@@ -317,23 +310,20 @@ function SidebarContent({
           </div>
         )}
 
-        {/* About */}
         <button
           onClick={onAbout}
           className="w-full flex items-center gap-3 p-2 hover:bg-[var(--bg-card-hover)] rounded-lg transition-all text-[var(--text-secondary)] hover:text-[#00f5ff]"
           title="Sobre a Zarith"
         >
           <Info size={16} className="shrink-0" />
-          {!isCollapsed && (
-            <span className="text-xs font-bold">Sobre</span>
-          )}
+          {!isCollapsed && <span className="text-xs font-bold">Sobre</span>}
         </button>
 
-        {/* User / Settings */}
         <Link
           href="/settings"
+          onClick={() => onClose?.()}
           className="flex items-center gap-3 p-2 hover:bg-[var(--bg-card-hover)] rounded-lg transition-all"
-          title={isCollapsed ? "Configurações" : undefined}
+          title={isCollapsed ? "Configuracoes" : undefined}
         >
           <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#00f5ff] to-[#bf00ff] flex items-center justify-center shrink-0 overflow-hidden">
             {user?.avatarUrl ? (
@@ -341,7 +331,9 @@ function SidebarContent({
                 src={user.avatarUrl}
                 alt={displayName}
                 className="w-full h-full object-cover"
-                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = "none";
+                }}
               />
             ) : (
               <User size={14} className="text-white" />
@@ -352,7 +344,7 @@ function SidebarContent({
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-bold truncate">{displayName}</p>
                 <p className="text-[10px] text-[var(--text-secondary)] truncate">
-                  {displayEmail || "Configurações"}
+                  {displayEmail || "Configuracoes"}
                 </p>
               </div>
               <Settings size={14} className="text-[var(--text-secondary)] shrink-0" />
@@ -381,7 +373,6 @@ export function Sidebar({
 
   return (
     <>
-      {/* ── Mobile: Hamburguer button ── */}
       <button
         onClick={() => setMobileOpen(true)}
         className={`${forceMobileLayout ? "flex" : "md:hidden"} fixed top-[calc(0.75rem+env(safe-area-inset-top))] left-3 z-40 p-2.5 bg-[var(--bg-secondary)] border border-[var(--border-glow)] rounded-xl text-[#00f5ff] shadow-lg`}
@@ -390,11 +381,9 @@ export function Sidebar({
         <Menu size={20} />
       </button>
 
-      {/* ── Mobile: Drawer overlay ── */}
       <AnimatePresence>
         {mobileOpen && (
           <>
-            {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -402,7 +391,6 @@ export function Sidebar({
               className={`${forceMobileLayout ? "block" : "md:hidden"} fixed inset-0 z-50 bg-black/60 backdrop-blur-sm`}
               onClick={() => setMobileOpen(false)}
             />
-            {/* Drawer */}
             <motion.div
               initial={{ x: "-100%" }}
               animate={{ x: 0 }}
@@ -439,7 +427,6 @@ export function Sidebar({
         )}
       </AnimatePresence>
 
-      {/* ── Desktop: Sidebar fixa ── */}
       <motion.div
         animate={{ width: isCollapsed ? 72 : 272 }}
         transition={{ duration: 0.22, ease: "easeInOut" }}
@@ -461,7 +448,6 @@ export function Sidebar({
         />
       </motion.div>
 
-      {/* About Modal */}
       <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />
     </>
   );
