@@ -1,61 +1,54 @@
-import { supabaseClient } from "@/lib/supabase";
+/**
+ * Conversations Service
+ * Serviço para gerenciamento de conversas usando API Client
+ * 
+ * NOTA: Este serviço substitui o antigo que usava Supabase direto
+ * Agora usa o API Client para comunicar com o backend
+ */
 
-export interface Conversation {
-  id: string;
-  user_id: string;
-  title: string;
-  created_at: string;
-  updated_at: string;
-}
+import { api } from "@/lib/api-client";
+import type { Conversation } from "@/lib/api-client";
+
+export interface ConversationType extends Conversation {}
 
 export const conversationsService = {
   async listConversations() {
-    if (!supabaseClient) return { data: null, error: new Error("Supabase não configurado") };
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    if (!user) return { data: null, error: new Error("Usuário não autenticado") };
-
-    const { data, error } = await supabaseClient
-      .from("conversations")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("updated_at", { ascending: false });
-
-    return { data: data as Conversation[] | null, error };
+    const response = await api.conversations.list({ limit: 50 });
+    
+    if (response.success && response.data) {
+      return { data: response.data.data as ConversationType[], error: null };
+    }
+    
+    return { data: null, error: new Error(response.error || "Erro ao listar conversas") };
   },
 
   async createConversation(title: string = "Nova conversa") {
-    if (!supabaseClient) return { data: null, error: new Error("Supabase não configurado") };
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    if (!user) return { data: null, error: new Error("Usuário não autenticado") };
-
-    const { data, error } = await supabaseClient
-      .from("conversations")
-      .insert([{ user_id: user.id, title }])
-      .select()
-      .single();
-
-    return { data: data as Conversation | null, error };
+    const response = await api.conversations.create({ title });
+    
+    if (response.success && response.data) {
+      return { data: response.data as ConversationType, error: null };
+    }
+    
+    return { data: null, error: new Error(response.error || "Erro ao criar conversa") };
   },
 
   async updateConversation(id: string, title: string) {
-    if (!supabaseClient) return { data: null, error: new Error("Supabase não configurado") };
-    const { data, error } = await supabaseClient
-      .from("conversations")
-      .update({ title, updated_at: new Date().toISOString() })
-      .eq("id", id)
-      .select()
-      .single();
-
-    return { data: data as Conversation | null, error };
+    const response = await api.conversations.update(id, { title });
+    
+    if (response.success && response.data) {
+      return { data: response.data as ConversationType, error: null };
+    }
+    
+    return { data: null, error: new Error(response.error || "Erro ao atualizar conversa") };
   },
 
   async deleteConversation(id: string) {
-    if (!supabaseClient) return { error: new Error("Supabase não configurado") };
-    const { error } = await supabaseClient
-      .from("conversations")
-      .delete()
-      .eq("id", id);
-
-    return { error };
+    const response = await api.conversations.delete(id);
+    
+    if (response.success) {
+      return { error: null };
+    }
+    
+    return { error: new Error(response.error || "Erro ao deletar conversa") };
   }
 };
