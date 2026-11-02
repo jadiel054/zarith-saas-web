@@ -92,7 +92,6 @@ export default defineConfig(async () => {
             vendor: ["react", "react-dom"],
             motion: ["framer-motion"],
             ui: ["@radix-ui/react-dialog", "cmdk", "lucide-react"],
-            supabase: ["@supabase/supabase-js", "@supabase/ssr"],
           },
         },
       },

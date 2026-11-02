@@ -2,9 +2,7 @@
  * Users Service
  * Gerencia usuários usando Drizzle ORM
  * 
- * NOTA: Este serviço gerencia apenas os dados de usuário no banco.
- * A autenticação (login/signup) continua sendo feita pelo Supabase Auth
- * ou será implementada separadamente.
+ * Autenticação nativa implementada
  */
 
 import { db, users, type User, type NewUser } from "@workspace/db";
@@ -81,7 +79,6 @@ export const usersService = {
 
   /**
    * Criar novo usuário
-   * NOTA: Para uso interno ou quando não usar Supabase Auth
    */
   async create(input: Omit<NewUser, "id" | "created_at" | "updated_at">) {
     const [data] = await db
@@ -221,35 +218,5 @@ export const usersService = {
     return result?.count || 0;
   },
 
-  /**
-   * Sincronizar usuário do Supabase Auth
-   * Chamado quando o usuário faz login com Supabase
-   */
-  async syncFromSupabase(supabaseUser: {
-    id: string;
-    email: string;
-    name?: string;
-    avatar_url?: string;
-  }) {
-    const existingUser = await this.getById(supabaseUser.id);
-    
-    if (existingUser) {
-      // Atualizar dados existentes
-      return this.update(supabaseUser.id, {
-        email: supabaseUser.email,
-        name: supabaseUser.name,
-        avatar_url: supabaseUser.avatar_url,
-      });
-    } else {
-      // Criar novo usuário
-      return this.create({
-        id: supabaseUser.id,
-        email: supabaseUser.email,
-        name: supabaseUser.name,
-        avatar_url: supabaseUser.avatar_url,
-        email_verified: true,
-        is_active: true,
-      });
-    }
-  },
+
 };

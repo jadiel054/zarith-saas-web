@@ -3,16 +3,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Component, type ReactNode } from "react";
 import { CommandPalette } from "@/components/command-palette";
 import NotFound from "@/pages/not-found";
-import LoginPage from "@/pages/login";
+import { LoginPage } from "@/pages/auth";
 import ChatPage from "@/pages/chat";
 import DashboardPage from "@/pages/dashboard";
 import SettingsPage from "@/pages/settings";
 import MemoriesPage from "@/pages/memories";
 import AdminPage from "@/pages/admin";
-import AuthCallbackPage from "@/pages/auth-callback";
-import { getSessionWithTimeout, supabaseClient } from "@/lib/supabase";
 import { UpdateBanner } from "@/components/update-banner";
 import { useState, useEffect } from "react";
+
+// API base URL
+const API_BASE = import.meta.env.BASE_URL || "/";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -82,74 +83,38 @@ function LoadingScreen() {
 }
 
 // Guard que protege rotas autenticadas.
-// Se supabaseClient não estiver configurado (vars ausentes), permite acesso
-// livre para não bloquear o desenvolvimento local.
+// Verifica sessão via API nativa
 function AuthGuard({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<"checking" | "authenticated" | "unauthenticated">("checking");
 
   useEffect(() => {
     let isMounted = true;
-    let authEventResolved = false;
 
-    const updateStatus = (
-      nextStatus: "authenticated" | "unauthenticated",
-      reason: string,
-    ) => {
-      if (!isMounted) return;
-
-      console.info("[AuthGuard] Atualizando status.", { nextStatus, reason });
-      setStatus((currentStatus) => (currentStatus === nextStatus ? currentStatus : nextStatus));
+    const checkAuth = async () => {
+      try {
+        const response = await fetch("/api/auth/me", {
+          credentials: "include",
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.data?.user) {
+            if (isMounted) setStatus("authenticated");
+            return;
+          }
+        }
+        
+        if (isMounted) setStatus("unauthenticated");
+      } catch (error) {
+        console.error("[AuthGuard] Falha ao verificar autenticação:", error);
+        if (isMounted) setStatus("unauthenticated");
+      }
     };
 
-    if (!supabaseClient) {
-      console.info("[AuthGuard] Supabase ausente; liberando acesso local.");
-      updateStatus("authenticated", "supabase ausente");
-      return;
-    }
-
-    console.info("[AuthGuard] Iniciando bootstrap de autenticação.");
-
-    // Ouve mudanças de estado de autenticação (logout em outras abas, expiração de token)
-    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((event, session) => {
-      authEventResolved = true;
-      console.info("[AuthGuard] Evento de autenticação recebido.", {
-        event,
-        hasSession: Boolean(session),
-      });
-      updateStatus(session ? "authenticated" : "unauthenticated", `evento ${event}`);
-    });
-
-    void (async () => {
-      try {
-        const { session, error, timedOut } = await getSessionWithTimeout();
-
-        if (!isMounted) return;
-
-        if (authEventResolved) {
-          console.info("[AuthGuard] Resultado de getSession() ignorado porque um evento de autenticação já resolveu o estado.");
-          return;
-        }
-
-        if (error) {
-          console.warn("[AuthGuard] Bootstrap concluiu com fallback.", {
-            timedOut,
-            message: error.message,
-          });
-        }
-
-        updateStatus(
-          session ? "authenticated" : "unauthenticated",
-          timedOut ? "fallback por timeout" : "resultado de getSession()",
-        );
-      } catch (error) {
-        console.error("[AuthGuard] Falha inesperada no bootstrap.", error);
-        updateStatus("unauthenticated", "fallback por exceção");
-      }
-    })();
+    checkAuth();
 
     return () => {
       isMounted = false;
-      subscription.unsubscribe();
     };
   }, []);
 
@@ -165,7 +130,7 @@ function Router() {
       <Route path="/" component={LoginPage} />
 
       {/* Callback de OAuth — público (precisa trocar o code) */}
-      <Route path="/api/auth/callback" component={AuthCallbackPage} />
+
 
       {/* Rotas protegidas — requerem autenticação */}
       <Route path="/chat">

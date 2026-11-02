@@ -1,5 +1,7 @@
 import { motion } from "framer-motion";
-import { supabaseClient } from "@/lib/supabase";
+
+// API base URL
+const API_BASE = import.meta.env.BASE_URL || "/";
 
 export interface QuickAction {
   icon: string;
@@ -86,13 +88,26 @@ interface ActionCardsProps {
 export function ActionCards({ onSelectAction, forceMobileLayout = false }: ActionCardsProps) {
   const handleCardClick = async (action: QuickAction) => {
     // Valida sessão antes de disparar
-    if (supabaseClient) {
-      const { data: { session } } = await supabaseClient.auth.getSession();
-      if (!session) {
+    try {
+      const response = await fetch(`${API_BASE}api/auth/me`, {
+        credentials: "include",
+      });
+      
+      if (!response.ok) {
         window.location.href = "/";
         return;
       }
+      
+      const data = await response.json();
+      if (!data.success || !data.data?.user) {
+        window.location.href = "/";
+        return;
+      }
+    } catch (error) {
+      window.location.href = "/";
+      return;
     }
+    
     onSelectAction(action.message);
   };
 

@@ -2,7 +2,7 @@ import { pgTable, text, uuid, timestamp, boolean } from "drizzle-orm/pg-core";
 
 /**
  * Tabela de usuários do sistema
- * Compatível com Supabase Auth (se mantivermos) ou autenticação própria
+ * Autenticação nativa (sem Supabase)
  */
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -10,9 +10,15 @@ export const users = pgTable("users", {
   name: text("name"),
   avatar_url: text("avatar_url"),
   
-  // Campos para autenticação própria (se não usar Supabase Auth)
-  password_hash: text("password_hash"),
+  // Campos para autenticação própria
+  password_hash: text("password_hash").notNull(),
   email_verified: boolean("email_verified").default(false),
+  email_verification_token: text("email_verification_token"),
+  email_verification_token_expires: timestamp("email_verification_token_expires"),
+  
+  // Recuperação de senha
+  password_reset_token: text("password_reset_token"),
+  password_reset_token_expires: timestamp("password_reset_token_expires"),
   
   // Metadados
   created_at: timestamp("created_at").defaultNow().notNull(),
