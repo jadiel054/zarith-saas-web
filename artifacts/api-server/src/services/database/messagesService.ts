@@ -3,8 +3,7 @@
  * Gerencia mensagens do chat usando Drizzle ORM
  */
 
-import { db } from "@workspace/db";
-import { messages, type Message, type NewMessage } from "@workspace/db/src/schema";
+import { db, messages, type Message, type NewMessage } from "@workspace/db";
 import { eq, and, desc, asc } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 

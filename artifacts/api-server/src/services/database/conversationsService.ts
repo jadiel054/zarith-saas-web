@@ -3,8 +3,7 @@
  * Gerencia conversas (sessões de chat) usando Drizzle ORM
  */
 
-import { db } from "@workspace/db";
-import { conversations, type Conversation, type NewConversation } from "@workspace/db/src/schema";
+import { db, conversations, type Conversation, type NewConversation } from "@workspace/db";
 import { eq, and, desc, asc } from "drizzle-orm";
 
 export interface ConversationWithCount extends Conversation {

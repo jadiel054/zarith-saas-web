@@ -7,8 +7,7 @@
  * ou será implementada separadamente.
  */
 
-import { db } from "@workspace/db";
-import { users, type User, type NewUser } from "@workspace/db/src/schema";
+import { db, users, type User, type NewUser } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 

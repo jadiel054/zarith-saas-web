@@ -3,8 +3,7 @@
  * Gerencia sites criados pelo usuário
  */
 
-import { db } from "@workspace/db";
-import { sites, type Site, type NewSite } from "@workspace/db/src/schema";
+import { db, sites, type Site, type NewSite } from "@workspace/db";
 import { eq, and, desc, asc } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 

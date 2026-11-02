@@ -3,8 +3,7 @@
  * Gerencia templates para geração de código, sites e conteúdo
  */
 
-import { db } from "@workspace/db";
-import { templates, type Template, type NewTemplate } from "@workspace/db/src/schema";
+import { db, templates, type Template, type NewTemplate } from "@workspace/db";
 import { eq, and, desc, asc } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 

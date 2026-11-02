@@ -3,8 +3,7 @@
  * Gerencia conteúdo criado (artigos, posts, páginas)
  */
 
-import { db } from "@workspace/db";
-import { content, type Content, type NewContent } from "@workspace/db/src/schema";
+import { db, content, type Content, type NewContent } from "@workspace/db";
 import { eq, and, desc, asc } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 

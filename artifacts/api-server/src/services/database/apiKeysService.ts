@@ -3,8 +3,7 @@
  * Gerencia API keys para integrações externas
  */
 
-import { db } from "@workspace/db";
-import { api_keys, type ApiKey, type NewApiKey } from "@workspace/db/src/schema";
+import { db, api_keys, type ApiKey, type NewApiKey } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import * as crypto from "node:crypto";
