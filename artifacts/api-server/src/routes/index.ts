@@ -10,10 +10,12 @@ import webRouter from "./web";
 import filesRouter from "./files";
 import chatRouter from "./chat";
 import versionRouter from "./version";
+import authRouter from "./auth";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use("/auth", authRouter);
 router.use("/github", githubRouter);
 router.use("/deploy", deployRouter);
 router.use("/supabase", supabaseRouter);

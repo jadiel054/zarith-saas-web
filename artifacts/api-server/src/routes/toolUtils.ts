@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import path from "node:path";
+import { extractBearerToken, verifyToken } from "../lib/auth";
 
 export type JsonRecord = Record<string, any>;
 
@@ -11,35 +12,46 @@ export function sendSuccess<T>(res: Response, data: T, statusCode: number = 200)
 }
 
 export function getUserIdFromRequest(req: Request): string | undefined {
-  // Obter do header Authorization (Bearer token do Supabase)
   const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    const token = authHeader.split(" ")[1];
+  const bearer = extractBearerToken(
+    typeof authHeader === "string" ? authHeader : undefined
+  );
+
+  if (bearer) {
+    // 1) JWT nativo Zarith (assinado com JWT_SECRET)
+    const zarith = verifyToken(bearer);
+    if (zarith?.sub) return zarith.sub;
+
+    // 2) Fallback: JWT do Supabase (legado) — só lê o payload, sem verificar assinatura
     try {
-      // Decodificar JWT para obter user_id
-      const base64Payload = token.split(".")[1];
-      const payload = JSON.parse(Buffer.from(base64Payload, "base64").toString("utf8"));
-      return payload.sub || payload.user_id || payload.id;
+      const base64Payload = bearer.split(".")[1];
+      if (base64Payload) {
+        const payload = JSON.parse(
+          Buffer.from(base64Payload, "base64").toString("utf8")
+        );
+        const id = payload.sub || payload.user_id || payload.id;
+        if (typeof id === "string" && id) return id;
+      }
     } catch {
-      // Ignorar erro
+      // ignore
     }
   }
-  
-  // Obter do body (para requisições POST)
+
   if (req.body && typeof req.body === "object") {
-    return req.body.userId || req.body.user_id;
+    const id = req.body.userId || req.body.user_id;
+    if (typeof id === "string" && id) return id;
   }
-  
-  // Obter do query params
+
   if (req.query && typeof req.query === "object") {
-    return String(req.query.userId || req.query.user_id || "");
+    const id = req.query.userId || req.query.user_id;
+    if (typeof id === "string" && id) return id;
   }
-  
+
   return undefined;
 }
 
 export function getBody(req: Request): JsonRecord {
-  return (req.body && typeof req.body === "object") ? req.body : {};
+  return req.body && typeof req.body === "object" ? req.body : {};
 }
 
 export function tokenFrom(req: Request, envName: string, bodyKeys: string[] = ["token"]): string {
@@ -59,12 +71,21 @@ export function required(value: any, name: string): string {
 }
 
 export function boolConfirmed(body: JsonRecord): boolean {
-  return body.confirm === true || body.confirmation === true || body.confirm === "CONFIRMAR" || body.confirmation === "CONFIRMAR";
+  return (
+    body.confirm === true ||
+    body.confirmation === true ||
+    body.confirm === "CONFIRMAR" ||
+    body.confirmation === "CONFIRMAR"
+  );
 }
 
 export function sendError(res: Response, error: any, fallback = "Erro interno no api-server.") {
   const status = Number(error?.statusCode || error?.status || error?.response?.status || 500);
-  const providerMessage = error?.response?.data?.message || error?.response?.data?.error || error?.message || fallback;
+  const providerMessage =
+    error?.response?.data?.message ||
+    error?.response?.data?.error ||
+    error?.message ||
+    fallback;
   return res.status(status).json({
     success: false,
     error: providerMessage,
@@ -73,20 +94,39 @@ export function sendError(res: Response, error: any, fallback = "Erro interno no
   });
 }
 
-export async function providerFetch(url: string, init: RequestInit = {}, providerName = "serviço externo") {
+export async function providerFetch(
+  url: string,
+  init: RequestInit = {},
+  providerName = "serviço externo"
+) {
   const response = await fetch(url, init);
   const text = await response.text();
   let data: any = text;
-  try { data = text ? JSON.parse(text) : null; } catch { /* mantém texto */ }
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    /* mantém texto */
+  }
   if (!response.ok) {
-    const message = data?.message || data?.error || data?.error_description || text || `${providerName} retornou HTTP ${response.status}`;
+    const message =
+      data?.message ||
+      data?.error ||
+      data?.error_description ||
+      text ||
+      `${providerName} retornou HTTP ${response.status}`;
     throw Object.assign(new Error(message), { statusCode: response.status, data });
   }
   return data;
 }
 
 export function githubHeaders(token: string) {
-  if (!token) throw Object.assign(new Error("GITHUB_TOKEN não configurado. Envie { token: \"ghp_...\" } ou configure a variável de ambiente."), { statusCode: 401 });
+  if (!token)
+    throw Object.assign(
+      new Error(
+        'GITHUB_TOKEN não configurado. Envie { token: "ghp_..." } ou configure a variável de ambiente.'
+      ),
+      { statusCode: 401 }
+    );
   return {
     Authorization: `Bearer ${token}`,
     Accept: "application/vnd.github+json",
@@ -96,16 +136,47 @@ export function githubHeaders(token: string) {
 }
 
 export function vercelHeaders(token: string) {
-  if (!token) throw Object.assign(new Error("VERCEL_TOKEN não configurado. Envie { token: \"...\" } ou configure a variável de ambiente."), { statusCode: 401 });
+  if (!token)
+    throw Object.assign(
+      new Error(
+        'VERCEL_TOKEN não configurado. Envie { token: "..." } ou configure a variável de ambiente.'
+      ),
+      { statusCode: 401 }
+    );
   return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 }
 
 export function supabaseCreds(req: Request) {
   const body = getBody(req);
-  const url = (body.url || body.supabaseUrl || body.SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
-  const key = (body.key || body.serviceRoleKey || body.service_role_key || body.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
-  if (!url) throw Object.assign(new Error("SUPABASE_URL não configurada. Envie { url: \"https://xxxx.supabase.co\" } ou configure a variável de ambiente."), { statusCode: 401 });
-  if (!key) throw Object.assign(new Error("SUPABASE_SERVICE_ROLE_KEY não configurada. Envie { serviceRoleKey: \"eyJ...\" } ou configure a variável de ambiente."), { statusCode: 401 });
+  const url = (
+    body.url ||
+    body.supabaseUrl ||
+    body.SUPABASE_URL ||
+    process.env.SUPABASE_URL ||
+    ""
+  ).trim();
+  const key = (
+    body.key ||
+    body.serviceRoleKey ||
+    body.service_role_key ||
+    body.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    ""
+  ).trim();
+  if (!url)
+    throw Object.assign(
+      new Error(
+        'SUPABASE_URL não configurada. Envie { url: "https://xxxx.supabase.co" } ou configure a variável de ambiente.'
+      ),
+      { statusCode: 401 }
+    );
+  if (!key)
+    throw Object.assign(
+      new Error(
+        'SUPABASE_SERVICE_ROLE_KEY não configurada. Envie { serviceRoleKey: "eyJ..." } ou configure a variável de ambiente.'
+      ),
+      { statusCode: 401 }
+    );
   return { url: url.replace(/\/$/, ""), key };
 }
 
@@ -129,13 +200,19 @@ export function safeWorkspacePath(inputPath = ".") {
   const workspaceRoot = path.resolve(process.env.ZARITH_WORKSPACE_DIR || process.cwd());
   const requested = path.resolve(workspaceRoot, inputPath);
   if (!requested.startsWith(workspaceRoot)) {
-    throw Object.assign(new Error("Caminho inválido: tentativa de acessar fora do workspace da Zarith."), { statusCode: 400 });
+    throw Object.assign(
+      new Error("Caminho inválido: tentativa de acessar fora do workspace da Zarith."),
+      { statusCode: 400 }
+    );
   }
   return { workspaceRoot, requested };
 }
 
 export function normalizeOwnerRepo(body: JsonRecord) {
-  const owner = required(body.owner || body.user || body.username || process.env.GITHUB_OWNER || "jadiel054", "owner");
+  const owner = required(
+    body.owner || body.user || body.username || process.env.GITHUB_OWNER || "jadiel054",
+    "owner"
+  );
   const repo = body.repo ? required(body.repo, "repo") : "";
   return { owner, repo };
 }
