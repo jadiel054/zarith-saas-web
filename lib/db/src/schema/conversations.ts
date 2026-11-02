@@ -40,18 +40,3 @@ export const conversationsRelations = relations(conversations, ({ one, many }) =
 
 export type Conversation = typeof conversations.$inferSelect;
 export type NewConversation = typeof conversations.$inferInsert;
-
-// Helper para importar messages (evitar circular dependency)
-import { pgTable as pgTableInner, uuid as uuidInner, text as textInner, timestamp as timestampInner } from "drizzle-orm/pg-core";
-import { users as usersInner } from "./users";
-
-const messages = pgTableInner("messages", {
-  id: uuidInner("id").primaryKey().defaultRandom(),
-  conversation_id: uuidInner("conversation_id").notNull(),
-  role: textInner("role", { enum: ["user", "assistant", "system"] }).notNull(),
-  content: textInner("content").notNull(),
-  model: textInner("model"),
-  created_at: timestampInner("created_at").defaultNow().notNull(),
-});
-
-export { messages };
